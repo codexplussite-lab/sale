@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Software House Lead Engine</title>
+  <title>Software House Lead Engine — CodeXplus</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
@@ -11,14 +11,18 @@
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight text-white">Software House Lead Engine</h1>
-        <p class="text-sm text-slate-400">Reddit + X high-intent leads scored by Gemini 2.5 Flash</p>
+        <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          <span>🚀</span> Software House Lead Engine
+        </h1>
+        <p class="text-sm text-slate-400 mt-1">
+          High-intent social leads (Reddit, X, HackerNews, Threads) scored & drafted by Gemini AI
+        </p>
       </div>
       <div class="flex items-center gap-3">
-        <button onclick="openSettings()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium border border-slate-700">
+        <button onclick="openSettings()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium border border-slate-700 transition">
           Settings
         </button>
-        <button id="syncBtn" onclick="triggerSync()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white">
+        <button id="syncBtn" onclick="triggerSync()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white transition shadow-lg shadow-indigo-600/20">
           Run Sync Now
         </button>
       </div>
@@ -27,42 +31,46 @@
     <!-- Stats -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400 uppercase">Total Leads</div>
-        <div id="statTotal" class="text-2xl font-bold mt-1">0</div>
+        <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Leads</div>
+        <div id="statTotal" class="text-2xl font-bold mt-1 text-white">0</div>
       </div>
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400 uppercase">Qualified (7+)</div>
+        <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Qualified (7+)</div>
         <div id="statQualified" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
       </div>
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400 uppercase">Pending Review</div>
+        <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Pending Review</div>
         <div id="statPending" class="text-2xl font-bold text-amber-400 mt-1">0</div>
       </div>
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400 uppercase">Replied</div>
+        <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Replied</div>
         <div id="statReplied" class="text-2xl font-bold text-indigo-400 mt-1">0</div>
       </div>
     </div>
 
     <!-- Filters -->
     <div class="flex flex-wrap gap-3 mb-6 bg-slate-900 border border-slate-800 p-4 rounded-xl">
-      <select id="filterStatus" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <select id="filterStatus" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
         <option value="all">All Statuses</option>
         <option value="pending_review" selected>Pending Review</option>
         <option value="replied">Replied</option>
         <option value="archived">Archived</option>
       </select>
-      <select id="filterPlatform" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <select id="filterPlatform" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
         <option value="all">All Platforms</option>
         <option value="reddit">Reddit</option>
         <option value="x">X (Twitter)</option>
+        <option value="hackernews">HackerNews</option>
+        <option value="threads">Threads</option>
+        <option value="telegram">Telegram</option>
+        <option value="facebook">Facebook</option>
       </select>
-      <select id="filterScore" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <select id="filterScore" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
         <option value="0">All Scores</option>
         <option value="7" selected>Score 7+</option>
         <option value="5">Score 5+</option>
       </select>
-      <input id="filterQuery" oninput="loadLeads()" type="text" placeholder="Search posts or authors..." class="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
+      <input id="filterQuery" oninput="debounceLoadLeads()" type="text" placeholder="Search posts, summaries, or authors..." class="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
     </div>
 
     <!-- Leads List -->
@@ -70,96 +78,148 @@
   </div>
 
   <!-- Settings Modal -->
-  <div id="settingsModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
+  <div id="settingsModal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Engine Settings</h2>
-        <button onclick="closeSettings()" class="text-slate-400 hover:text-white">&times;</button>
+        <h2 class="text-lg font-semibold text-white">Engine Settings</h2>
+        <button onclick="closeSettings()" class="text-slate-400 hover:text-white text-xl font-bold">&times;</button>
       </div>
-      <div id="credStatus" class="text-xs text-slate-300 bg-slate-800/70 p-3 rounded-lg"></div>
+      <div id="credStatus" class="text-xs text-slate-300 bg-slate-800/80 p-3 rounded-lg border border-slate-700/50 space-y-1"></div>
       <div>
-        <label class="block text-xs text-slate-400 mb-1">Reddit Search Query</label>
-        <textarea id="setRedditQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm"></textarea>
+        <label class="block text-xs font-semibold text-slate-400 mb-1">Reddit Search Query</label>
+        <textarea id="setRedditQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
       </div>
       <div>
-        <label class="block text-xs text-slate-400 mb-1">X API v2 Search Query</label>
-        <textarea id="setXQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm"></textarea>
+        <label class="block text-xs font-semibold text-slate-400 mb-1">X API v2 / Social Search Query</label>
+        <textarea id="setXQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
       </div>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs text-slate-400 mb-1">Min Alert Score (1-10)</label>
-          <input id="setMinScore" type="number" min="1" max="10" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" />
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Min Alert Score (1-10)</label>
+          <input id="setMinScore" type="number" min="1" max="10" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
         </div>
         <div>
-          <label class="block text-xs text-slate-400 mb-1">Sync Interval (Minutes)</label>
-          <input id="setInterval" type="number" min="5" max="1440" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" />
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Sync Interval (Minutes)</label>
+          <input id="setInterval" type="number" min="5" max="1440" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
         </div>
       </div>
       <div class="flex justify-end gap-3 pt-2">
-        <button onclick="closeSettings()" class="px-4 py-2 rounded-lg bg-slate-800 text-sm">Cancel</button>
-        <button onclick="saveSettings()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold">Save</button>
+        <button onclick="closeSettings()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium transition">Cancel</button>
+        <button onclick="saveSettings()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white transition">Save Changes</button>
       </div>
     </div>
   </div>
 
   <script>
+    let searchTimeout = null;
+
+    function debounceLoadLeads() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(loadLeads, 300);
+    }
+
+    function getPlatformStyle(platform) {
+      switch ((platform || '').toLowerCase()) {
+        case 'reddit':
+          return 'bg-orange-500/20 text-orange-300 border border-orange-500/30';
+        case 'x':
+        case 'twitter':
+          return 'bg-sky-500/20 text-sky-300 border border-sky-500/30';
+        case 'hackernews':
+          return 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+        case 'threads':
+          return 'bg-pink-500/20 text-pink-300 border border-pink-500/30';
+        case 'telegram':
+          return 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30';
+        case 'facebook':
+          return 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
+        default:
+          return 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
+      }
+    }
+
     async function loadLeads() {
       const status = document.getElementById('filterStatus').value;
       const platform = document.getElementById('filterPlatform').value;
       const minScore = document.getElementById('filterScore').value;
       const q = document.getElementById('filterQuery').value;
       const params = new URLSearchParams({ status, platform, min_score: minScore, q });
-      const res = await fetch('/api/leads?' + params.toString());
-      const data = await res.json();
 
-      document.getElementById('statTotal').textContent = data.stats.total;
-      document.getElementById('statQualified').textContent = data.stats.qualified;
-      document.getElementById('statPending').textContent = data.stats.pending;
-      document.getElementById('statReplied').textContent = data.stats.replied;
+      try {
+        const res = await fetch('/api/leads?' + params.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
 
-      const container = document.getElementById('leadsContainer');
-      if (!data.leads.length) {
-        container.innerHTML = '<div class="text-center py-12 text-slate-500 bg-slate-900 border border-slate-800 rounded-xl">No leads match these filters yet. Click "Run Sync Now" or wait for the scheduled run.</div>';
-        return;
-      }
+        document.getElementById('statTotal').textContent = data.stats.total;
+        document.getElementById('statQualified').textContent = data.stats.qualified;
+        document.getElementById('statPending').textContent = data.stats.pending;
+        document.getElementById('statReplied').textContent = data.stats.replied;
 
-      container.innerHTML = data.leads.map(lead => `
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.platform === 'reddit' ? 'bg-orange-500/20 text-orange-300' : 'bg-sky-500/20 text-sky-300'}">${lead.platform.toUpperCase()}</span>
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.intent_score >= 7 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-300'}">Score: ${lead.intent_score}/10</span>
-              <span class="px-2.5 py-0.5 rounded-full text-xs bg-indigo-500/20 text-indigo-300">${lead.project_category || 'other'}</span>
-              <span class="text-sm text-slate-300 font-medium">${escapeHtml(lead.author_handle || '')}</span>
+        const container = document.getElementById('leadsContainer');
+        if (!data.leads.length) {
+          container.innerHTML = '<div class="text-center py-12 text-slate-500 bg-slate-900 border border-slate-800 rounded-xl">No leads match these filters yet. Click "Run Sync Now" or wait for the background worker.</div>';
+          return;
+        }
+
+        container.innerHTML = data.leads.map(lead => `
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${getPlatformStyle(lead.platform)}">${escapeHtml((lead.platform || 'web').toUpperCase())}</span>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.intent_score >= 7 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}">Score: ${lead.intent_score}/10</span>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${escapeHtml(lead.project_category || 'other')}</span>
+                <span class="text-xs text-slate-400 font-mono">${escapeHtml(lead.author_handle || '')}</span>
+              </div>
+              <a href="${escapeHtml(lead.post_url)}" target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1">
+                Open Original Post &rarr;
+              </a>
             </div>
-            <a href="${escapeHtml(lead.post_url)}" target="_blank" rel="noopener" class="text-xs text-indigo-400 hover:underline">Open Original Post &rarr;</a>
+            <div class="text-sm text-slate-100 font-semibold">${escapeHtml(lead.pain_point_summary || 'No summary')}</div>
+            <p class="text-xs text-slate-400 whitespace-pre-line line-clamp-4 leading-relaxed">${escapeHtml(lead.raw_text || '')}</p>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">AI-Drafted Value Reply (CodeXplus)</label>
+              <textarea id="reply-${lead.id}" rows="3" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 leading-relaxed">${escapeHtml(lead.drafted_reply || '')}</textarea>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 pt-1">
+              <button onclick="copyReply(${lead.id}, this)" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium border border-slate-700 transition">Copy Reply</button>
+              <button onclick="updateLead(${lead.id}, 'replied')" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition">Save & Mark Replied</button>
+              <button onclick="updateLead(${lead.id}, 'archived')" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-xs font-medium text-slate-400 hover:text-white border border-slate-700 transition">Archive</button>
+            </div>
           </div>
-          <div class="text-sm text-slate-200 font-medium">${escapeHtml(lead.pain_point_summary || '')}</div>
-          <p class="text-xs text-slate-400 whitespace-pre-line line-clamp-4">${escapeHtml(lead.raw_text || '')}</p>
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Drafted Reply</label>
-            <textarea id="reply-${lead.id}" rows="3" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-200">${escapeHtml(lead.drafted_reply || '')}</textarea>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium">Copy Reply</button>
-            <button onclick="updateLead(${lead.id}, 'replied')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold">Save & Mark Replied</button>
-            <button onclick="updateLead(${lead.id}, 'archived')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-xs font-medium">Archive</button>
-          </div>
-        </div>
-      `).join('');
+        `).join('');
+      } catch (err) {
+        console.error('Failed to load leads:', err);
+      }
     }
 
     function escapeHtml(str) {
-      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
     }
 
-    async function copyReply(id) {
-      const text = document.getElementById('reply-' + id).value;
-      await navigator.clipboard.writeText(text);
+    async function copyReply(id, btn) {
+      const textarea = document.getElementById('reply-' + id);
+      if (!textarea) return;
+      try {
+        await navigator.clipboard.writeText(textarea.value);
+        if (btn) {
+          const original = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          btn.classList.add('text-emerald-400');
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove('text-emerald-400');
+          }, 1500);
+        }
+      } catch {
+        textarea.select();
+        document.execCommand('copy');
+      }
     }
 
     async function updateLead(id, status) {
-      const drafted_reply = document.getElementById('reply-' + id).value;
+      const textarea = document.getElementById('reply-' + id);
+      const drafted_reply = textarea ? textarea.value : undefined;
       await fetch('/api/leads/' + id, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -175,8 +235,10 @@
       try {
         const res = await fetch('/api/sync', { method: 'POST' });
         const result = await res.json();
-        alert(`Sync complete: fetched ${result.fetched}, saved ${result.saved}, qualified ${result.qualified}` + (result.errors.length ? `\nNotes: ${result.errors.join('; ')}` : ''));
+        alert(`Sync complete!\nFetched: ${result.fetched}\nSaved: ${result.saved}\nQualified (7+): ${result.qualified}` + (result.errors && result.errors.length ? `\n\nNotes:\n- ${result.errors.join('\n- ')}` : ''));
         loadLeads();
+      } catch (err) {
+        alert('Sync request failed: ' + err.message);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Run Sync Now';
@@ -190,9 +252,18 @@
       document.getElementById('setXQuery').value = data.x_query || '';
       document.getElementById('setMinScore').value = data.min_intent_score || 7;
       document.getElementById('setInterval').value = data.sync_interval_minutes || 20;
-      const c = data.configured;
-      document.getElementById('credStatus').innerHTML =
-        `API Keys (.env): Gemini ${c.gemini ? '✅' : '❌'} | Reddit ${c.reddit ? '✅' : '❌'} | X ${c.x ? '✅' : '❌'} | Discord ${c.discord ? '✅' : '❌'}`;
+
+      const c = data.configured || {};
+      document.getElementById('credStatus').innerHTML = `
+        <div class="font-semibold text-slate-300 mb-1">Configuration Status (.env):</div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-400">
+          <div>Gemini AI: <span class="${c.gemini ? 'text-emerald-400' : 'text-rose-400'}">${c.gemini ? 'Connected' : 'Missing'}</span></div>
+          <div>Serper (Google Search): <span class="${c.serper ? 'text-emerald-400' : 'text-amber-400'}">${c.serper ? 'Connected' : 'Optional (Skipped)'}</span></div>
+          <div>Reddit API: <span class="${c.reddit ? 'text-emerald-400' : 'text-slate-500'}">${c.reddit ? 'Connected' : 'Optional (Free fallback used)'}</span></div>
+          <div>X (Twitter) v2: <span class="${c.x ? 'text-emerald-400' : 'text-slate-500'}">${c.x ? 'Connected' : 'Optional'}</span></div>
+          <div class="col-span-2">Discord Alerts: <span class="${c.discord ? 'text-emerald-400' : 'text-slate-500'}">${c.discord ? 'Connected' : 'Optional'}</span></div>
+        </div>
+      `;
       document.getElementById('settingsModal').classList.remove('hidden');
     }
 

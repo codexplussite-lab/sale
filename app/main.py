@@ -5,12 +5,15 @@ from pathlib import Path
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.db import get_settings_dict, init_db, pool
 from app.worker import run_lead_sync
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 scheduler = BackgroundScheduler()
@@ -22,7 +25,13 @@ async def lifespan(_: FastAPI):
     init_db()
     settings = get_settings_dict()
     interval = max(5, int(settings.get("sync_interval_minutes", "20")))
-    scheduler.add_job(run_lead_sync, "interval", minutes=interval, id="lead_sync_job", replace_existing=True)
+    scheduler.add_job(
+        run_lead_sync,
+        "interval",
+        minutes=interval,
+        id="lead_sync_job",
+        replace_existing=True,
+    )
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -123,13 +132,18 @@ def list_leads(
         for r in rows
     ]
 
+    total = stats_row[0] if stats_row else 0
+    qualified = stats_row[1] if stats_row else 0
+    pending = stats_row[2] if stats_row else 0
+    replied = stats_row[3] if stats_row else 0
+
     return {
         "leads": leads,
         "stats": {
-            "total": stats_row[0],
-            "qualified": stats_row[1],
-            "pending": stats_row[2],
-            "replied": stats_row[3],
+            "total": total,
+            "qualified": qualified,
+            "pending": pending,
+            "replied": replied,
         },
     }
 
@@ -186,13 +200,22 @@ def trigger_sync():
 @app.get("/api/settings")
 def read_settings():
     settings = get_settings_dict()
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    reddit_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
+    reddit_sec = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
+    x_bearer = os.getenv("X_BEARER_TOKEN", "").strip()
+    discord_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+    serper_key = os.getenv("SERPER_API_KEY", "").strip()
+
     return {
         **settings,
         "configured": {
-            "gemini": bool(os.getenv("GEMINI_API_KEY", "").strip()),
-            "reddit": bool(os.getenv("REDDIT_CLIENT_ID", "").strip() and os.getenv("REDDIT_CLIENT_SECRET", "").strip()),
-            "x": bool(os.getenv("X_BEARER_TOKEN", "").strip()),
-            "discord": bool(os.getenv("DISCORD_WEBHOOK_URL", "").strip()),
+            "gemini": bool(gemini_key and not gemini_key.startswith("your_")),
+            "reddit": bool(reddit_id and reddit_sec and not reddit_id.startswith("your_")),
+            "x": bool(x_bearer and not x_bearer.startswith("your_")),
+            "discord": bool(discord_url and "your_id" not in discord_url),
+            "serper": bool(serper_key and not serper_key.startswith("your_")),
         },
     }
 

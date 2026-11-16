@@ -1,10 +1,26 @@
+import logging
 import os
+import time
+from dotenv import load_dotenv
 from psycopg_pool import ConnectionPool
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://leaduser:changeme_strong_password@localhost:5432/leads_db",
-)
+load_dotenv()
+
+logger = logging.getLogger("lead_db")
+
+
+def get_database_url() -> str:
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL").strip()
+    user = os.getenv("POSTGRES_USER", "leaduser").strip()
+    password = os.getenv("POSTGRES_PASSWORD", "changeme_strong_password").strip()
+    host = os.getenv("POSTGRES_HOST", "localhost").strip()
+    port = os.getenv("POSTGRES_PORT", "5432").strip()
+    db = os.getenv("POSTGRES_DB", "leads_db").strip()
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
+DATABASE_URL = get_database_url()
 
 pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10, open=False)
 
@@ -31,6 +47,9 @@ CREATE INDEX IF NOT EXISTS idx_social_leads_platform_post_id
 CREATE INDEX IF NOT EXISTS idx_social_leads_status_score
   ON social_leads (status, intent_score DESC);
 
+CREATE INDEX IF NOT EXISTS idx_social_leads_created_at
+  ON social_leads (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -46,17 +65,34 @@ DEFAULT_SETTINGS = {
 }
 
 
-def init_db() -> None:
-    pool.open(wait=True)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(SCHEMA_SQL)
-            for k, v in DEFAULT_SETTINGS.items():
-                cur.execute(
-                    "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING;",
-                    (k, str(v)),
-                )
-        conn.commit()
+def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
+    for attempt in range(1, max_retries + 1):
+        try:
+            if not pool.opened:
+                pool.open(wait=True)
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(SCHEMA_SQL)
+                    for k, v in DEFAULT_SETTINGS.items():
+                        cur.execute(
+                            "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING;",
+                            (k, str(v)),
+                        )
+                conn.commit()
+            logger.info("Database initialized successfully.")
+            return
+        except Exception as exc:
+            if attempt == max_retries:
+                logger.error("Failed to initialize database after %s attempts: %s", max_retries, exc)
+                raise
+            logger.warning(
+                "Database not ready (attempt %s/%s): %s. Retrying in %ss...",
+                attempt,
+                max_retries,
+                exc,
+                retry_delay,
+            )
+            time.sleep(retry_delay)
 
 
 def get_settings_dict() -> dict[str, str]:

@@ -27,7 +27,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-leaduser}:${POSTGRES_PASSWORD:-changeme_strong_password}@postgres:5432/${POSTGRES_DB:-leads_db}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-leaduser}:${POSTGRES_PASSWORD:-changeme_strong_password}@postgres:5432/${POSTGRES_DB:-leads_db}}
       TZ: Asia/Karachi
 
 volumes:
