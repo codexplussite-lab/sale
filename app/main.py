@@ -1,73 +1,11 @@
-import logging
-import os
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Optional
-
-from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-
-from app.db import get_settings_dict, init_db, pool
-from app.worker import run_lead_sync
-
-load_dotenv()
-
-logging.basicConfig(level=logging.INFO)
-scheduler = BackgroundScheduler()
-STATIC_DIR = Path(__file__).parent / "static"
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    init_db()
-    settings = get_settings_dict()
-    interval = max(5, int(settings.get("sync_interval_minutes", "20")))
-    scheduler.add_job(
-        run_lead_sync,
-        "interval",
-        minutes=interval,
-        id="lead_sync_job",
-        replace_existing=True,
-    )
-    scheduler.start()
-    yield
-    scheduler.shutdown(wait=False)
-    pool.close()
-
-
-app = FastAPI(title="Software House Lead Engine", lifespan=lifespan)
-
-
-class LeadUpdate(BaseModel):
-    status: Optional[str] = None
-    drafted_reply: Optional[str] = None
-
-
-class SettingsUpdate(BaseModel):
-    reddit_query: str
-    x_query: str
-    min_intent_score: int
-    sync_interval_minutes: int
-
-
-@app.get("/")
-def serve_dashboard():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
-
-
+# ... existing code ...
 @app.get("/api/leads")
 def list_leads(
     status: Optional[str] = Query(default=None),
     platform: Optional[str] = Query(default=None),
     min_score: int = Query(default=0),
+    region: Optional[str] = Query(default=None),
+    has_budget: bool = Query(default=False),
     q: Optional[str] = Query(default=None),
 ):
     clauses = ["intent_score >= %s"]
@@ -79,96 +17,64 @@ def list_leads(
     if platform and platform != "all":
         clauses.append("platform = %s")
         params.append(platform)
+    if region == "usa":
+        clauses.append(
+            "(raw_text ~* '\\\\m(USA|US|United States|USD|EST|PST|CST|MST|New York|California|Texas|Florida)\\\\M' OR raw_text ILIKE '%%$%%')"
+        )
+    elif region == "uk_eu":
+        clauses.append(
+            "(raw_text ~* '\\\\m(UK|United Kingdom|London|Europe|EU|Germany|France|GBP|EUR)\\\\M' OR raw_text ILIKE '%%£%%' OR raw_text ILIKE '%%€%%')"
+        )
+    if has_budget:
+        clauses.append(
+            "(raw_text ~* '(\\$|USD|EUR|GBP|£|€|budget|paying|rate|/hr|fixed price)' OR pain_point_summary ~* '(\\$|USD|budget)')"
+        )
     if q:
         clauses.append("(raw_text ILIKE %s OR pain_point_summary ILIKE %s OR author_handle ILIKE %s)")
         like = f"%{q}%"
         params.extend([like, like, like])
 
     where_sql = " AND ".join(clauses)
-
+# ... existing code ...
+@app.post("/api/leads/{lead_id}/regenerate")
+def regenerate_lead_reply(lead_id: int):
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT id, platform, platform_post_id, author_handle, post_url,
-                       raw_text, intent_score, project_category, pain_point_summary,
-                       drafted_reply, status, created_at
-                FROM social_leads
-                WHERE {where_sql}
-                ORDER BY created_at DESC, intent_score DESC
-                LIMIT 200;
-                """,
-                params,
+                "SELECT platform, author_handle, raw_text FROM social_leads WHERE id = %s;",
+                (lead_id,),
             )
-            rows = cur.fetchall()
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Lead not found")
 
+        lead = {"platform": row[0], "author_handle": row[1] or "", "raw_text": row[2] or ""}
+        try:
+            scored = score_with_gemini(lead)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Gemini error: {exc}")
+
+        with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT
-                  COUNT(*) AS total,
-                  COUNT(*) FILTER (WHERE intent_score >= 7) AS qualified,
-                  COUNT(*) FILTER (WHERE status = 'pending_review') AS pending,
-                  COUNT(*) FILTER (WHERE status = 'replied') AS replied
-                FROM social_leads;
-                """
+                UPDATE social_leads
+                SET drafted_reply = %s, pain_point_summary = %s, updated_at = NOW()
+                WHERE id = %s;
+                """,
+                (scored["drafted_reply"], scored["pain_point_summary"], lead_id),
             )
-            stats_row = cur.fetchone()
-
-    leads = [
-        {
-            "id": r[0],
-            "platform": r[1],
-            "platform_post_id": r[2],
-            "author_handle": r[3],
-            "post_url": r[4],
-            "raw_text": r[5],
-            "intent_score": r[6],
-            "project_category": r[7],
-            "pain_point_summary": r[8],
-            "drafted_reply": r[9],
-            "status": r[10],
-            "created_at": r[11].isoformat() if r[11] else None,
-        }
-        for r in rows
-    ]
-
-    total = stats_row[0] if stats_row else 0
-    qualified = stats_row[1] if stats_row else 0
-    pending = stats_row[2] if stats_row else 0
-    replied = stats_row[3] if stats_row else 0
+        conn.commit()
 
     return {
-        "leads": leads,
-        "stats": {
-            "total": total,
-            "qualified": qualified,
-            "pending": pending,
-            "replied": replied,
-        },
+        "id": lead_id,
+        "drafted_reply": scored["drafted_reply"],
+        "pain_point_summary": scored["pain_point_summary"],
     }
 
 
 @app.patch("/api/leads/{lead_id}")
 def update_lead(lead_id: int, payload: LeadUpdate):
-    updates = []
-    params: list[object] = []
-
-    if payload.status is not None:
-        if payload.status not in {"pending_review", "replied", "archived"}:
-            raise HTTPException(status_code=400, detail="Invalid status")
-        updates.append("status = %s")
-        params.append(payload.status)
-
-    if payload.drafted_reply is not None:
-        updates.append("drafted_reply = %s")
-        params.append(payload.drafted_reply)
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    updates.append("updated_at = NOW()")
-    params.append(lead_id)
-
+# ... existing code ...
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -192,55 +98,18 @@ def delete_lead(lead_id: int):
     return {"deleted": True, "id": lead_id}
 
 
-@app.post("/api/sync")
-def trigger_sync():
-    return run_lead_sync()
-
-
-@app.get("/api/settings")
-def read_settings():
-    settings = get_settings_dict()
-
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    reddit_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
-    reddit_sec = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
-    x_bearer = os.getenv("X_BEARER_TOKEN", "").strip()
-    discord_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
-    serper_key = os.getenv("SERPER_API_KEY", "").strip()
-
-    return {
-        **settings,
-        "configured": {
-            "gemini": bool(gemini_key and not gemini_key.startswith("your_")),
-            "reddit": bool(reddit_id and reddit_sec and not reddit_id.startswith("your_")),
-            "x": bool(x_bearer and not x_bearer.startswith("your_")),
-            "discord": bool(discord_url and "your_id" not in discord_url),
-            "serper": bool(serper_key and not serper_key.startswith("your_")),
-        },
-    }
-
-
-@app.put("/api/settings")
-def update_settings(payload: SettingsUpdate):
-    interval = max(5, payload.sync_interval_minutes)
-    pairs = {
-        "reddit_query": payload.reddit_query,
-        "x_query": payload.x_query,
-        "min_intent_score": str(payload.min_intent_score),
-        "sync_interval_minutes": str(interval),
-    }
+@app.delete("/api/leads")
+def bulk_delete_leads(status: Optional[str] = Query(default=None)):
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            for k, v in pairs.items():
-                cur.execute(
-                    """
-                    INSERT INTO app_settings (key, value, updated_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
-                    """,
-                    (k, v),
-                )
+            if status and status != "all":
+                cur.execute("DELETE FROM social_leads WHERE status = %s;", (status,))
+            else:
+                cur.execute("DELETE FROM social_leads;")
+            deleted_count = cur.rowcount
         conn.commit()
+    return {"deleted": deleted_count}
 
-    scheduler.reschedule_job("lead_sync_job", trigger="interval", minutes=interval)
-    return {"saved": True}
+
+@app.post("/api/sync")
+# ... existing code ...
