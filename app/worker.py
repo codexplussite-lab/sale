@@ -1,7 +1,10 @@
+import html
 import json
 import logging
 import os
+import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,74 +26,141 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+def _parse_reddit_children(children: list[dict[str, Any]], twelve_hours_ago: float) -> list[dict[str, Any]]:
+    leads: list[dict[str, Any]] = []
+    for child in children:
+        data = child.get("data", {})
+        post_id = data.get("id")
+        if not post_id:
+            continue
+        created_utc = float(data.get("created_utc") or time.time())
+        if created_utc < twelve_hours_ago:
+            continue
+
+        raw_text = f"{data.get('title', '')}\n\n{data.get('selftext', '')}".strip()
+        if not raw_text:
+            continue
+
+        permalink = data.get("permalink")
+        post_url = (
+            f"https://www.reddit.com{permalink}"
+            if permalink
+            else f"https://www.reddit.com/comments/{post_id}"
+        )
+        author = data.get("author")
+        leads.append(
+            {
+                "platform": "reddit",
+                "platform_post_id": f"reddit_{post_id}",
+                "author_handle": f"u/{author}" if author else "unknown",
+                "post_url": post_url,
+                "raw_text": raw_text[:4000],
+            }
+        )
+    return leads
+
+
+def _fetch_reddit_rss(client: httpx.Client, query: str, user_agent: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
+    resp = client.get(
+        "https://www.reddit.com/search.rss",
+        params={"q": query, "sort": "new", "t": "day"},
+        headers={"User-Agent": user_agent},
+    )
+    resp.raise_for_status()
+    root = ET.fromstring(resp.text)
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    leads: list[dict[str, Any]] = []
+
+    for entry in root.findall("atom:entry", ns):
+        entry_id = (entry.findtext("atom:id", "", ns) or "").strip()
+        title = (entry.findtext("atom:title", "", ns) or "").strip()
+        link_el = entry.find("atom:link", ns)
+        post_url = link_el.attrib.get("href", "") if link_el is not None else ""
+        author_name = (entry.findtext("atom:author/atom:name", "", ns) or "unknown").strip()
+        updated_str = (entry.findtext("atom:updated", "", ns) or "").strip()
+        content_html = entry.findtext("atom:content", "", ns) or ""
+
+        if updated_str:
+            try:
+                updated_ts = datetime.fromisoformat(updated_str.replace("Z", "+00:00")).timestamp()
+                if updated_ts < twelve_hours_ago:
+                    continue
+            except ValueError:
+                pass
+
+        clean_body = re.sub(r"<[^>]+>", " ", html.unescape(content_html))
+        clean_body = re.sub(r"\s+", " ", clean_body).strip()
+        raw_text = f"{title}\n\n{clean_body}".strip()
+        if not raw_text:
+            continue
+
+        post_id = entry_id.split("_")[-1] if "_" in entry_id else entry_id.rsplit("/", 1)[-1]
+        if not post_id:
+            continue
+
+        leads.append(
+            {
+                "platform": "reddit",
+                "platform_post_id": f"reddit_{post_id}",
+                "author_handle": author_name if author_name.startswith("/u/") or author_name.startswith("u/") else f"u/{author_name}",
+                "post_url": post_url or f"https://www.reddit.com/comments/{post_id}",
+                "raw_text": raw_text[:4000],
+            }
+        )
+    return leads
+
+
 def fetch_reddit_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
     client_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
     client_secret = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
-    user_agent = os.getenv("REDDIT_USER_AGENT", "SoftwareHouseLeadEngine/1.0").strip()
+    user_agent = os.getenv(
+        "REDDIT_USER_AGENT",
+        "Mozilla/5.0 (compatible; SoftwareHouseLeadEngine/1.0; +https://hunt.codexplus.site)",
+    ).strip()
 
-    if not client_id or not client_secret:
-        logger.info("Reddit credentials not configured; skipping Reddit fetch.")
-        return []
-
-    leads: list[dict[str, Any]] = []
-    with httpx.Client(timeout=20.0) as client:
-        token_resp = client.post(
-            "https://www.reddit.com/api/v1/access_token",
-            auth=(client_id, client_secret),
-            data={"grant_type": "client_credentials"},
-            headers={"User-Agent": user_agent},
-        )
-        token_resp.raise_for_status()
-        access_token = token_resp.json().get("access_token")
-        if not access_token:
-            return []
-
-        search_resp = client.get(
-            "https://oauth.reddit.com/search",
-            params={"q": query, "sort": "new", "limit": 25, "t": "day"},
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "User-Agent": user_agent,
-            },
-        )
-        search_resp.raise_for_status()
-        children = search_resp.json().get("data", {}).get("children", [])
-
-        for child in children:
-            data = child.get("data", {})
-            post_id = data.get("id")
-            if not post_id:
-                continue
-            created_utc = float(data.get("created_utc") or time.time())
-            if created_utc < twelve_hours_ago:
-                continue
-
-            raw_text = f"{data.get('title', '')}\n\n{data.get('selftext', '')}".strip()
-            if not raw_text:
-                continue
-
-            permalink = data.get("permalink")
-            post_url = (
-                f"https://www.reddit.com{permalink}"
-                if permalink
-                else f"https://www.reddit.com/comments/{post_id}"
+    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+        # Use OAuth if valid credentials are provided
+        if client_id and client_secret and not client_id.startswith("your_"):
+            token_resp = client.post(
+                "https://www.reddit.com/api/v1/access_token",
+                auth=(client_id, client_secret),
+                data={"grant_type": "client_credentials"},
+                headers={"User-Agent": user_agent},
             )
-            author = data.get("author")
-            leads.append(
-                {
-                    "platform": "reddit",
-                    "platform_post_id": f"reddit_{post_id}",
-                    "author_handle": f"u/{author}" if author else "unknown",
-                    "post_url": post_url,
-                    "raw_text": raw_text[:4000],
-                }
+            token_resp.raise_for_status()
+            access_token = token_resp.json().get("access_token")
+            if access_token:
+                search_resp = client.get(
+                    "https://oauth.reddit.com/search",
+                    params={"q": query, "sort": "new", "limit": 25, "t": "day"},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "User-Agent": user_agent,
+                    },
+                )
+                search_resp.raise_for_status()
+                children = search_resp.json().get("data", {}).get("children", [])
+                return _parse_reddit_children(children, twelve_hours_ago)
+
+        # No-key fallback: public Reddit search JSON, then RSS if blocked
+        try:
+            public_resp = client.get(
+                "https://www.reddit.com/search.json",
+                params={"q": query, "sort": "new", "limit": 25, "t": "day"},
+                headers={"User-Agent": user_agent},
             )
-    return leads
+            if public_resp.status_code == 200:
+                children = public_resp.json().get("data", {}).get("children", [])
+                return _parse_reddit_children(children, twelve_hours_ago)
+        except Exception:
+            logger.info("Public JSON search failed, falling back to Reddit RSS.")
+
+        return _fetch_reddit_rss(client, query, user_agent, twelve_hours_ago)
 
 
 def fetch_x_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
     bearer = os.getenv("X_BEARER_TOKEN", "").strip()
-    if not bearer:
+    if not bearer or bearer.startswith("your_"):
         logger.info("X_BEARER_TOKEN not configured; skipping X fetch.")
         return []
 
@@ -154,7 +224,7 @@ def fetch_x_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
 
 def score_with_gemini(lead: dict[str, Any]) -> dict[str, Any]:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
+    if not api_key or api_key.startswith("your_"):
         return {
             "intent_score": 0,
             "is_qualified": False,
@@ -235,7 +305,7 @@ def score_with_gemini(lead: dict[str, Any]) -> dict[str, Any]:
 
 def send_discord_alert(lead: dict[str, Any]) -> None:
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
-    if not webhook_url:
+    if not webhook_url or "your_id" in webhook_url:
         return
 
     content = (
