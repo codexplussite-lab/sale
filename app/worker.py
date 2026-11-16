@@ -1,10 +1,9 @@
-import html
+import hashlib
 import json
 import logging
 import os
 import re
 import time
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,154 +13,232 @@ from app.db import get_settings_dict, pool
 
 logger = logging.getLogger("lead_worker")
 
+GEMINI_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.8-flash",
+]
+
+HIRING_SUBREDDITS = [
+    "forhire",
+    "freelance_forhire",
+    "DesignJobs",
+    "slavelabour",
+    "hiring",
+    "arduino",
+]
+
 SYSTEM_INSTRUCTION = (
-    "You are a senior technical solutions architect for a full-stack software house "
-    "specializing in SaaS MVPs, custom web/mobile apps, ERPs/CRMs, and AI integrations. "
-    "Evaluate the social media post for real B2B buying intent. Score 1-3 for job seekers, "
-    "spam, or vague ideas; 4-6 for early brainstorming; 7-10 for founders or businesses "
-    "actively seeking developers, agencies, or technical quotes. If score is 7 or higher, "
-    "write a concise, value-first reply (under 90 words) that directly addresses their "
-    "technical architecture challenge first, mentions relevant delivery experience subtly, "
-    "and ends with a low-friction question. Never use generic agency buzzwords or pushy links."
+    "You are a senior solutions architect at CodeXplus (codexplus.site), a full-service software house "
+    "offering mobile & web apps, custom software, graphic design & digital art, social media marketing, "
+    "SEO & GEO, and custom Arduino hardware/software on client demand. "
+    "Evaluate the post strictly for CLIENT PROJECT ORDERS WITH BUDGETS. "
+    "Score 1-2 (is_qualified=false) if the author is a developer, designer, marketer, or agency offering "
+    "or advertising their own services ('[For Hire]', 'I build websites', 'DM me for services'), "
+    "or if it is a full-time job ad, internship, tutorial, or showcase. "
+    "Score 7-10 (is_qualified=true, 8-10 if a budget is stated) ONLY when a client or business is actively "
+    "ordering/hiring someone to build an app, website, custom software, graphic design/art, social media marketing, "
+    "SEO/GEO, or Arduino project. Include any mentioned budget in pain_point_summary. "
+    "If score is 7 or higher, write a concise, helpful reply (under 90 words) from CodeXplus addressing "
+    "their project need directly and ending with a low-friction question."
 )
 
 
-def _parse_reddit_children(children: list[dict[str, Any]], twelve_hours_ago: float) -> list[dict[str, Any]]:
+def _detect_platform(url: str) -> str:
+    lower = url.lower()
+    if "reddit.com" in lower:
+        return "reddit"
+    if "x.com" in lower or "twitter.com" in lower:
+        return "x"
+    if "threads.net" in lower:
+        return "threads"
+    if "facebook.com" in lower or "fb.com" in lower:
+        return "facebook"
+    if "t.me" in lower or "telegram.me" in lower:
+        return "telegram"
+    return "web"
+
+
+def _extract_post_id(platform: str, url: str) -> str:
+    if platform == "reddit":
+        match = re.search(r"/comments/([a-z0-9]+)", url, re.IGNORECASE)
+        if match:
+            return f"reddit_{match.group(1)}"
+    elif platform == "x":
+        match = re.search(r"/status/(\d+)", url)
+        if match:
+            return f"x_{match.group(1)}"
+    return f"{platform}_{hashlib.sha1(url.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _extract_handle(platform: str, url: str) -> str:
+    if platform == "reddit":
+        m = re.search(r"reddit\.com/r/([^/]+)", url, re.IGNORECASE)
+        return f"r/{m.group(1)}" if m else "reddit"
+    if platform == "x":
+        m = re.search(r"(?:x|twitter)\.com/([^/]+)", url, re.IGNORECASE)
+        return f"@{m.group(1)}" if m and m.group(1) not in {"i", "search"} else "x_user"
+    if platform == "threads":
+        m = re.search(r"threads\.net/@?([^/]+)", url, re.IGNORECASE)
+        return f"@{m.group(1)}" if m else "threads"
+    if platform == "telegram":
+        m = re.search(r"t\.me/([^/]+)", url, re.IGNORECASE)
+        return f"t.me/{m.group(1)}" if m else "telegram"
+    return platform
+
+
+def fetch_fresh_reddit_arctic_shift() -> list[dict[str, Any]]:
+    """Fetch brand-new Reddit posts (<= 60 mins old, <= 2 comments) in near real-time."""
     leads: list[dict[str, Any]] = []
-    for child in children:
-        data = child.get("data", {})
-        post_id = data.get("id")
-        if not post_id:
-            continue
-        created_utc = float(data.get("created_utc") or time.time())
-        if created_utc < twelve_hours_ago:
-            continue
+    one_hour_ago = time.time() - 3600
 
-        raw_text = f"{data.get('title', '')}\n\n{data.get('selftext', '')}".strip()
-        if not raw_text:
-            continue
+    with httpx.Client(timeout=15.0) as client:
+        for sub in HIRING_SUBREDDITS:
+            try:
+                resp = client.get(
+                    "https://arctic-shift.photon-reddit.com/api/posts/search",
+                    params={"subreddit": sub, "limit": 15, "sort": "desc"},
+                )
+                if resp.status_code != 200:
+                    continue
+                for post in resp.json().get("data", []):
+                    post_id = post.get("id")
+                    title = (post.get("title") or "").strip()
+                    selftext = (post.get("selftext") or "").strip()
+                    created_utc = float(post.get("created_utc") or 0)
+                    num_comments = int(post.get("num_comments") or 0)
 
-        permalink = data.get("permalink")
-        post_url = (
-            f"https://www.reddit.com{permalink}"
-            if permalink
-            else f"https://www.reddit.com/comments/{post_id}"
-        )
-        author = data.get("author")
-        leads.append(
-            {
-                "platform": "reddit",
-                "platform_post_id": f"reddit_{post_id}",
-                "author_handle": f"u/{author}" if author else "unknown",
-                "post_url": post_url,
-                "raw_text": raw_text[:4000],
-            }
-        )
+                    if not post_id or created_utc < one_hour_ago:
+                        continue
+                    if num_comments > 2:
+                        continue  # Skip posts that already have replies
+
+                    lower_title = title.lower()
+                    if "[for hire]" in lower_title or "for hire" in lower_title:
+                        continue
+
+                    if sub != "arduino" and "[hiring]" not in lower_title and "hiring" not in lower_title and "budget" not in (title + selftext).lower():
+                        continue
+
+                    permalink = post.get("permalink")
+                    post_url = (
+                        f"https://www.reddit.com{permalink}"
+                        if permalink
+                        else f"https://www.reddit.com/r/{sub}/comments/{post_id}"
+                    )
+                    leads.append(
+                        {
+                            "platform": "reddit",
+                            "platform_post_id": f"reddit_{post_id}",
+                            "author_handle": f"u/{post.get('author')}" if post.get("author") else f"r/{sub}",
+                            "post_url": post_url,
+                            "raw_text": f"[Comments: {num_comments}] {title}\n\n{selftext}".strip()[:4000],
+                        }
+                    )
+            except Exception as exc:
+                logger.info("Arctic Shift skip r/%s: %s", sub, exc)
     return leads
 
 
-def _fetch_reddit_rss(client: httpx.Client, query: str, user_agent: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
-    resp = client.get(
-        "https://www.reddit.com/search.rss",
-        params={"q": query, "sort": "new", "t": "day"},
-        headers={"User-Agent": user_agent},
-    )
-    resp.raise_for_status()
-    root = ET.fromstring(resp.text)
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
+def _serper_search(search_query: str, num: int = 10) -> list[dict[str, Any]]:
+    serper_key = os.getenv("SERPER_API_KEY", "").strip()
+    if not serper_key or serper_key.startswith("your_"):
+        return []
+
+    with httpx.Client(timeout=20.0) as client:
+        resp = client.post(
+            "https://google.serper.dev/search",
+            headers={
+                "X-API-KEY": serper_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "q": search_query,
+                "num": num,
+                "tbs": "qdr:h",  # Past 1 hour only for freshest indexed leads
+            },
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Serper {resp.status_code}: {resp.text}")
+        data = resp.json()
+
     leads: list[dict[str, Any]] = []
-
-    for entry in root.findall("atom:entry", ns):
-        entry_id = (entry.findtext("atom:id", "", ns) or "").strip()
-        title = (entry.findtext("atom:title", "", ns) or "").strip()
-        link_el = entry.find("atom:link", ns)
-        post_url = link_el.attrib.get("href", "") if link_el is not None else ""
-        author_name = (entry.findtext("atom:author/atom:name", "", ns) or "unknown").strip()
-        updated_str = (entry.findtext("atom:updated", "", ns) or "").strip()
-        content_html = entry.findtext("atom:content", "", ns) or ""
-
-        if updated_str:
-            try:
-                updated_ts = datetime.fromisoformat(updated_str.replace("Z", "+00:00")).timestamp()
-                if updated_ts < twelve_hours_ago:
-                    continue
-            except ValueError:
-                pass
-
-        clean_body = re.sub(r"<[^>]+>", " ", html.unescape(content_html))
-        clean_body = re.sub(r"\s+", " ", clean_body).strip()
-        raw_text = f"{title}\n\n{clean_body}".strip()
-        if not raw_text:
+    for item in data.get("organic", []):
+        link = (item.get("link") or "").strip()
+        title = (item.get("title") or "").strip()
+        snippet = (item.get("snippet") or "").strip()
+        if not link or not (title or snippet):
             continue
 
-        post_id = entry_id.split("_")[-1] if "_" in entry_id else entry_id.rsplit("/", 1)[-1]
-        if not post_id:
-            continue
-
+        platform = _detect_platform(link)
         leads.append(
             {
-                "platform": "reddit",
-                "platform_post_id": f"reddit_{post_id}",
-                "author_handle": author_name if author_name.startswith("/u/") or author_name.startswith("u/") else f"u/{author_name}",
-                "post_url": post_url or f"https://www.reddit.com/comments/{post_id}",
-                "raw_text": raw_text[:4000],
+                "platform": platform,
+                "platform_post_id": _extract_post_id(platform, link),
+                "author_handle": _extract_handle(platform, link),
+                "post_url": link,
+                "raw_text": f"{title}\n\n{snippet}".strip()[:4000],
             }
         )
     return leads
 
 
 def fetch_reddit_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
-    client_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
-    client_secret = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
-    user_agent = os.getenv(
-        "REDDIT_USER_AGENT",
-        "Mozilla/5.0 (compatible; SoftwareHouseLeadEngine/1.0; +https://hunt.codexplus.site)",
-    ).strip()
+    client_query = (
+        '("[Hiring]" OR "looking to hire" OR "need someone to build" OR "need a developer" '
+        'OR "need a website" OR "need an app" OR "need a graphic designer" OR "need SEO" OR "Arduino project") '
+        '("budget" OR "$" OR "paying" OR "quote") '
+        '-"[For Hire]" -"for hire" -"I am a" -"looking for work" -"full-time" -"internship"'
+    )
+    return _serper_search(f"site:reddit.com {client_query}", num=10)
 
-    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-        # Use OAuth if valid credentials are provided
-        if client_id and client_secret and not client_id.startswith("your_"):
-            token_resp = client.post(
-                "https://www.reddit.com/api/v1/access_token",
-                auth=(client_id, client_secret),
-                data={"grant_type": "client_credentials"},
-                headers={"User-Agent": user_agent},
+
+def fetch_social_leads_via_serper(query: str) -> list[dict[str, Any]]:
+    site_filter = "(site:x.com OR site:threads.net OR site:facebook.com OR site:t.me)"
+    client_query = (
+        '("looking to hire" OR "need a developer" OR "need a website" OR "need an app" '
+        'OR "need a graphic designer" OR "need SEO" OR "need social media marketing") '
+        '("budget" OR "$" OR "paying" OR "DM me") '
+        '-"for hire" -"available for work" -"portfolio" -"full-time" -"internship"'
+    )
+    return _serper_search(f"{site_filter} {client_query}", num=10)
+
+
+def fetch_hackernews_leads() -> list[dict[str, Any]]:
+    leads: list[dict[str, Any]] = []
+    one_hour_ago = time.time() - 3600
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.get(
+            "https://hn.algolia.com/api/v1/search_by_date",
+            params={
+                "query": "looking to hire OR need developer OR need MVP OR software agency OR build SaaS",
+                "tags": "(story,ask_hn)",
+                "numericFilters": f"created_at_i>{int(one_hour_ago)},num_comments<=2",
+                "hitsPerPage": 10,
+            },
+        )
+        resp.raise_for_status()
+        for hit in resp.json().get("hits", []):
+            object_id = hit.get("objectID")
+            title = (hit.get("title") or "").strip()
+            story_text = (hit.get("story_text") or "").strip()
+            if not object_id or not (title or story_text):
+                continue
+            leads.append(
+                {
+                    "platform": "hackernews",
+                    "platform_post_id": f"hn_{object_id}",
+                    "author_handle": hit.get("author") or "hn_user",
+                    "post_url": f"https://news.ycombinator.com/item?id={object_id}",
+                    "raw_text": f"{title}\n\n{story_text}".strip()[:4000],
+                }
             )
-            token_resp.raise_for_status()
-            access_token = token_resp.json().get("access_token")
-            if access_token:
-                search_resp = client.get(
-                    "https://oauth.reddit.com/search",
-                    params={"q": query, "sort": "new", "limit": 25, "t": "day"},
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "User-Agent": user_agent,
-                    },
-                )
-                search_resp.raise_for_status()
-                children = search_resp.json().get("data", {}).get("children", [])
-                return _parse_reddit_children(children, twelve_hours_ago)
-
-        # No-key fallback: public Reddit search JSON, then RSS if blocked
-        try:
-            public_resp = client.get(
-                "https://www.reddit.com/search.json",
-                params={"q": query, "sort": "new", "limit": 25, "t": "day"},
-                headers={"User-Agent": user_agent},
-            )
-            if public_resp.status_code == 200:
-                children = public_resp.json().get("data", {}).get("children", [])
-                return _parse_reddit_children(children, twelve_hours_ago)
-        except Exception:
-            logger.info("Public JSON search failed, falling back to Reddit RSS.")
-
-        return _fetch_reddit_rss(client, query, user_agent, twelve_hours_ago)
+    return leads
 
 
 def fetch_x_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
     bearer = os.getenv("X_BEARER_TOKEN", "").strip()
     if not bearer or bearer.startswith("your_"):
-        logger.info("X_BEARER_TOKEN not configured; skipping X fetch.")
         return []
 
     leads: list[dict[str, Any]] = []
@@ -225,15 +302,8 @@ def fetch_x_leads(query: str, twelve_hours_ago: float) -> list[dict[str, Any]]:
 def score_with_gemini(lead: dict[str, Any]) -> dict[str, Any]:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key or api_key.startswith("your_"):
-        return {
-            "intent_score": 0,
-            "is_qualified": False,
-            "project_category": "other",
-            "pain_point_summary": "GEMINI_API_KEY not configured",
-            "drafted_reply": "",
-        }
+        raise RuntimeError("GEMINI_API_KEY is not configured in .env")
 
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     body = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [
@@ -263,8 +333,10 @@ def score_with_gemini(lead: dict[str, Any]) -> dict[str, Any]:
                             "mvp",
                             "web_app",
                             "mobile_app",
-                            "erp_crm",
-                            "ai_automation",
+                            "custom_software",
+                            "design_art",
+                            "marketing_seo_geo",
+                            "arduino_iot",
                             "other",
                         ],
                     },
@@ -282,10 +354,28 @@ def score_with_gemini(lead: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+    last_error = "Unknown Gemini error"
+    data = None
     with httpx.Client(timeout=30.0) as client:
-        resp = client.post(url, headers={"x-goog-api-key": api_key}, json=body)
-        resp.raise_for_status()
-        data = resp.json()
+        for model_name in GEMINI_MODELS:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            for attempt in range(2):
+                resp = client.post(url, headers={"x-goog-api-key": api_key}, json=body)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    break
+                last_error = f"{model_name} HTTP {resp.status_code}: {resp.text[:200]}"
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    time.sleep(2)
+                    continue
+                if resp.status_code == 404:
+                    break
+                raise RuntimeError(last_error)
+            if data is not None:
+                break
+
+    if data is None:
+        raise RuntimeError(last_error)
 
     raw_text = (
         data.get("candidates", [{}])[0]
@@ -330,15 +420,33 @@ def run_lead_sync() -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
 
     try:
+        candidates.extend(fetch_fresh_reddit_arctic_shift())
+    except Exception as exc:
+        logger.exception("Arctic Shift fetch failed")
+        errors.append(f"ArcticShift: {exc}")
+
+    try:
         candidates.extend(fetch_reddit_leads(reddit_query, twelve_hours_ago))
     except Exception as exc:
-        logger.exception("Reddit fetch failed")
+        logger.exception("Reddit Serper fetch failed")
         errors.append(f"Reddit: {exc}")
+
+    try:
+        candidates.extend(fetch_social_leads_via_serper(x_query))
+    except Exception as exc:
+        logger.exception("Social search failed")
+        errors.append(f"Social: {exc}")
+
+    try:
+        candidates.extend(fetch_hackernews_leads())
+    except Exception as exc:
+        logger.exception("HackerNews fetch failed")
+        errors.append(f"HackerNews: {exc}")
 
     try:
         candidates.extend(fetch_x_leads(x_query, twelve_hours_ago))
     except Exception as exc:
-        logger.exception("X fetch failed")
+        logger.exception("X API fetch failed")
         errors.append(f"X: {exc}")
 
     saved_count = 0
@@ -354,6 +462,7 @@ def run_lead_sync() -> dict[str, Any]:
                 if cur.fetchone():
                     continue
 
+            time.sleep(0.5)
             try:
                 scored = score_with_gemini(lead)
             except Exception as exc:
