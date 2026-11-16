@@ -1,10 +1,7 @@
 import os
-import json
-import sqlite3
-from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -34,6 +31,11 @@ class SettingsUpdate(BaseModel):
 @app.get("/")
 def serve_index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 @app.get("/api/leads")
@@ -69,8 +71,28 @@ def list_leads(
     query += " ORDER BY created_at DESC LIMIT 200"
     cur.execute(query, params)
     rows = [dict(row) for row in cur.fetchall()]
+
+    # Calculate stats expected by the frontend dashboard
+    cur.execute("SELECT COUNT(*) FROM leads")
+    total_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM leads WHERE status = 'new'")
+    new_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM leads WHERE score >= 7")
+    high_score_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM leads WHERE status = 'replied'")
+    replied_count = cur.fetchone()[0]
+
     conn.close()
-    return {"leads": rows}
+    return {
+        "leads": rows,
+        "stats": {
+            "total": total_count,
+            "new": new_count,
+            "high_score": high_score_count,
+            "qualified": high_score_count,
+            "replied": replied_count,
+        },
+    }
 
 
 @app.patch("/api/leads/{lead_id}")
@@ -146,7 +168,12 @@ def regenerate_reply(lead_id: int):
         raise HTTPException(status_code=404, detail="Lead not found")
 
     lead = dict(row)
-    new_reply = regenerate_lead_reply(lead)
+    try:
+        new_reply = regenerate_lead_reply(lead)
+    except Exception as exc:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(exc))
+
     cur.execute("UPDATE leads SET suggested_reply = ? WHERE id = ?", (new_reply, lead_id))
     conn.commit()
     conn.close()
@@ -156,6 +183,9 @@ def regenerate_reply(lead_id: int):
 @app.post("/api/sync")
 def trigger_sync():
     result = run_sync()
+    notes_str = result.get("notes", "")
+    errors_list = [n.strip() for n in notes_str.split(";") if n.strip()] if notes_str else []
+    result["errors"] = errors_list
     return result
 
 
