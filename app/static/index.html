@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Software House Lead Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-white">Software House Lead Engine</h1>
+        <p class="text-sm text-slate-400">Reddit + X high-intent leads scored by Gemini 2.5 Flash</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="openSettings()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-medium border border-slate-700">
+          Settings
+        </button>
+        <button id="syncBtn" onclick="triggerSync()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold text-white">
+          Run Sync Now
+        </button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs text-slate-400 uppercase">Total Leads</div>
+        <div id="statTotal" class="text-2xl font-bold mt-1">0</div>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs text-slate-400 uppercase">Qualified (7+)</div>
+        <div id="statQualified" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs text-slate-400 uppercase">Pending Review</div>
+        <div id="statPending" class="text-2xl font-bold text-amber-400 mt-1">0</div>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div class="text-xs text-slate-400 uppercase">Replied</div>
+        <div id="statReplied" class="text-2xl font-bold text-indigo-400 mt-1">0</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-3 mb-6 bg-slate-900 border border-slate-800 p-4 rounded-xl">
+      <select id="filterStatus" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="all">All Statuses</option>
+        <option value="pending_review" selected>Pending Review</option>
+        <option value="replied">Replied</option>
+        <option value="archived">Archived</option>
+      </select>
+      <select id="filterPlatform" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="all">All Platforms</option>
+        <option value="reddit">Reddit</option>
+        <option value="x">X (Twitter)</option>
+      </select>
+      <select id="filterScore" onchange="loadLeads()" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="0">All Scores</option>
+        <option value="7" selected>Score 7+</option>
+        <option value="5">Score 5+</option>
+      </select>
+      <input id="filterQuery" oninput="loadLeads()" type="text" placeholder="Search posts or authors..." class="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
+    </div>
+
+    <!-- Leads List -->
+    <div id="leadsContainer" class="space-y-4"></div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Engine Settings</h2>
+        <button onclick="closeSettings()" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+      <div id="credStatus" class="text-xs text-slate-300 bg-slate-800/70 p-3 rounded-lg"></div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Reddit Search Query</label>
+        <textarea id="setRedditQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm"></textarea>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">X API v2 Search Query</label>
+        <textarea id="setXQuery" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Min Alert Score (1-10)</label>
+          <input id="setMinScore" type="number" min="1" max="10" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Sync Interval (Minutes)</label>
+          <input id="setInterval" type="number" min="5" max="1440" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2">
+        <button onclick="closeSettings()" class="px-4 py-2 rounded-lg bg-slate-800 text-sm">Cancel</button>
+        <button onclick="saveSettings()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadLeads() {
+      const status = document.getElementById('filterStatus').value;
+      const platform = document.getElementById('filterPlatform').value;
+      const minScore = document.getElementById('filterScore').value;
+      const q = document.getElementById('filterQuery').value;
+      const params = new URLSearchParams({ status, platform, min_score: minScore, q });
+      const res = await fetch('/api/leads?' + params.toString());
+      const data = await res.json();
+
+      document.getElementById('statTotal').textContent = data.stats.total;
+      document.getElementById('statQualified').textContent = data.stats.qualified;
+      document.getElementById('statPending').textContent = data.stats.pending;
+      document.getElementById('statReplied').textContent = data.stats.replied;
+
+      const container = document.getElementById('leadsContainer');
+      if (!data.leads.length) {
+        container.innerHTML = '<div class="text-center py-12 text-slate-500 bg-slate-900 border border-slate-800 rounded-xl">No leads match these filters yet. Click "Run Sync Now" or wait for the scheduled run.</div>';
+        return;
+      }
+
+      container.innerHTML = data.leads.map(lead => `
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.platform === 'reddit' ? 'bg-orange-500/20 text-orange-300' : 'bg-sky-500/20 text-sky-300'}">${lead.platform.toUpperCase()}</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.intent_score >= 7 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-300'}">Score: ${lead.intent_score}/10</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs bg-indigo-500/20 text-indigo-300">${lead.project_category || 'other'}</span>
+              <span class="text-sm text-slate-300 font-medium">${escapeHtml(lead.author_handle || '')}</span>
+            </div>
+            <a href="${escapeHtml(lead.post_url)}" target="_blank" rel="noopener" class="text-xs text-indigo-400 hover:underline">Open Original Post &rarr;</a>
+          </div>
+          <div class="text-sm text-slate-200 font-medium">${escapeHtml(lead.pain_point_summary || '')}</div>
+          <p class="text-xs text-slate-400 whitespace-pre-line line-clamp-4">${escapeHtml(lead.raw_text || '')}</p>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Drafted Reply</label>
+            <textarea id="reply-${lead.id}" rows="3" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-200">${escapeHtml(lead.drafted_reply || '')}</textarea>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium">Copy Reply</button>
+            <button onclick="updateLead(${lead.id}, 'replied')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold">Save & Mark Replied</button>
+            <button onclick="updateLead(${lead.id}, 'archived')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-xs font-medium">Archive</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    async function copyReply(id) {
+      const text = document.getElementById('reply-' + id).value;
+      await navigator.clipboard.writeText(text);
+    }
+
+    async function updateLead(id, status) {
+      const drafted_reply = document.getElementById('reply-' + id).value;
+      await fetch('/api/leads/' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, drafted_reply })
+      });
+      loadLeads();
+    }
+
+    async function triggerSync() {
+      const btn = document.getElementById('syncBtn');
+      btn.disabled = true;
+      btn.textContent = 'Syncing...';
+      try {
+        const res = await fetch('/api/sync', { method: 'POST' });
+        const result = await res.json();
+        alert(`Sync complete: fetched ${result.fetched}, saved ${result.saved}, qualified ${result.qualified}` + (result.errors.length ? `\nNotes: ${result.errors.join('; ')}` : ''));
+        loadLeads();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Sync Now';
+      }
+    }
+
+    async function openSettings() {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      document.getElementById('setRedditQuery').value = data.reddit_query || '';
+      document.getElementById('setXQuery').value = data.x_query || '';
+      document.getElementById('setMinScore').value = data.min_intent_score || 7;
+      document.getElementById('setInterval').value = data.sync_interval_minutes || 20;
+      const c = data.configured;
+      document.getElementById('credStatus').innerHTML =
+        `API Keys (.env): Gemini ${c.gemini ? '✅' : '❌'} | Reddit ${c.reddit ? '✅' : '❌'} | X ${c.x ? '✅' : '❌'} | Discord ${c.discord ? '✅' : '❌'}`;
+      document.getElementById('settingsModal').classList.remove('hidden');
+    }
+
+    function closeSettings() {
+      document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    async function saveSettings() {
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reddit_query: document.getElementById('setRedditQuery').value,
+          x_query: document.getElementById('setXQuery').value,
+          min_intent_score: Number(document.getElementById('setMinScore').value),
+          sync_interval_minutes: Number(document.getElementById('setInterval').value)
+        })
+      });
+      closeSettings();
+    }
+
+    loadLeads();
+  </script>
+</body>
+</html>
