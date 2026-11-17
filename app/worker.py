@@ -79,14 +79,14 @@ def get_gemini_key_pool() -> list[tuple[str, str]]:
 
 def call_gemini(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
     """
-    Rotates automatically across all configured Gemini keys (Key #1 -> #2 -> #3 -> #4)
-    and active Gemini 2.5 models if any key hits 429 quota, 403/400 invalid key, or 503 overload.
+    Rotates across high-quota Flash-Lite models (gemini-3.5-flash-lite -> gemini-3.1-flash-lite -> gemini-3.8-flash)
+    and automatically fails over across all configured keys (Key #1 -> #2 -> #3 -> #4).
     """
     keys = override_keys if override_keys is not None else get_gemini_key_pool()
     if not keys:
         raise RuntimeError("No Gemini API keys configured. Add Key #1-#4 in Admin Panel or .env.")
 
-    models = ["gemini-3.8-flash", "gemini-3.8-pro", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro"]
+    models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
     errors = []
 
     for key_label, api_key in keys:
@@ -108,8 +108,8 @@ def call_gemini(prompt: str, override_keys: list[tuple[str, str]] | None = None)
 
                 err_msg = resp.text[:140].replace("\n", " ")
                 errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                # If key itself is invalid/quota-exceeded (400, 401, 403, 429), immediately fail over to next key
-                if resp.status_code in (400, 401, 403, 429):
+                # Only skip remaining models on this key if the key itself is invalid/unauthorized
+                if resp.status_code in (400, 401, 403):
                     break
             except Exception as exc:
                 errors.append(f"{key_label} ({model}): {exc}")
@@ -125,7 +125,7 @@ def test_single_gemini_key(api_key: str) -> dict:
         out = call_gemini("Reply with the single word: OK", [("Test Key", api_key.strip())])
         return {"ok": True, "detail": f"Active ({out[:20]})"}
     except Exception as exc:
-        return {"ok": False, "detail": str(exc)[:160]}
+        return {"ok": False, "detail": str(exc)[:180]}
 
 
 def score_and_draft(lead: dict) -> tuple[int, str, str]:
