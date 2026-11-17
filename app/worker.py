@@ -10,6 +10,17 @@ import httpx
 DB_PATH = os.environ.get("DB_PATH", "/app/data/leads.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
+DEFAULT_AGENT_PROMPT = """Hunt for REAL CLIENTS, startup founders, and business owners actively looking to hire or place a paid order for:
+- Web & Mobile Application Development (Next.js, React, Node.js, Python, Full-Stack SaaS, Shopify/WordPress)
+- Custom Software, AI Automation & API Integrations
+- Graphic Design, Branding & Digital Art
+- Social Media Marketing, SEO & GEO (Generative Engine Optimization)
+- Custom Arduino Hardware & Embedded Software Prototyping
+
+STRICT EXCLUSIONS (SCORE 1-2 AND REJECT):
+- Any freelancer, developer, designer, marketer, or agency advertising their own services ("for hire", "portfolio", "I will build", "DM me").
+- Unpaid internships, equity-only cofounder posts, spam, or irrelevant non-tech jobs."""
+
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -60,6 +71,17 @@ def get_setting(key: str, default: str = "") -> str:
     return default
 
 
+def set_setting(key: str, value: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_gemini_key_pool() -> list[tuple[str, str]]:
     """Collect up to 4 configured Gemini API keys (DB settings override .env)."""
     pool = []
@@ -108,7 +130,6 @@ def call_gemini(prompt: str, override_keys: list[tuple[str, str]] | None = None)
 
                 err_msg = resp.text[:140].replace("\n", " ")
                 errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                # Only skip remaining models on this key if the key itself is invalid/unauthorized
                 if resp.status_code in (400, 401, 403):
                     break
             except Exception as exc:
@@ -128,25 +149,48 @@ def test_single_gemini_key(api_key: str) -> dict:
         return {"ok": False, "detail": str(exc)[:180]}
 
 
-def score_and_draft(lead: dict) -> tuple[int, str, str]:
-    prompt = f"""You are a lead qualification assistant for CodeXplus (https://codexplus.site), a full-stack software house offering:
-- Mobile App & Web Application Development (Next.js, React, Node.js, Python, Custom Software)
-- Graphic Design & Digital Art
-- Social Media Marketing, SEO & GEO (Generative Engine Optimization)
-- Arduino Hardware & Embedded Software Prototyping on client demand
+def generate_queries_from_prompt(agent_prompt: str) -> dict:
+    """Uses Gemini to compile a plain-English agent prompt into Reddit & Serper search dorks."""
+    compiler_prompt = f"""You are a search query engineer for a B2B/freelance client lead scraper.
+Convert the user's Lead Hunter Agent Prompt into optimal search parameters.
 
-Analyze this post and decide if it is a REAL CLIENT looking to hire or place an order with a budget:
+USER AGENT PROMPT:
+{agent_prompt}
+
+Return ONLY valid JSON with these exact keys:
+{{
+  "subreddits": "comma-separated relevant subreddits without r/, e.g. forhire,freelance_forhire,DesignJobs,startups,SaaS,arduino",
+  "reddit_keywords": "comma-separated lowercase trigger phrases to require in Reddit titles, e.g. [hiring],looking to hire,need a developer,need an app,budget",
+  "serper_dork": "Google search boolean query without site: prefix to find buyers/clients with budgets, e.g. (\\"looking to hire\\" OR \\"need a developer\\" OR \\"need a website\\") (\\"budget\\" OR \\"$\\") -\\"for hire\\""
+}}"""
+    raw = call_gemini(compiler_prompt)
+    cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
+    parsed = json.loads(cleaned)
+    return {
+        "subreddits": str(parsed.get("subreddits", "forhire,freelance_forhire,DesignJobs,slavelabour,hiring,arduino")),
+        "reddit_keywords": str(parsed.get("reddit_keywords", "[hiring],looking to hire,need a,looking for a")),
+        "serper_dork": str(parsed.get("serper_dork", '("looking to hire" OR "need a developer" OR "need a website" OR "need an app") ("budget" OR "$") -"for hire"')),
+    }
+
+
+def score_and_draft(lead: dict, agent_prompt: str) -> tuple[int, str, str]:
+    prompt = f"""You are the Lead Qualification & Outreach Agent for CodeXplus (https://codexplus.site).
+
+FOLLOW THIS ACTIVE AGENT MISSION & FILTERING RUBRIC STRICTLY:
+{agent_prompt}
+
+CANDIDATE LEAD TO EVALUATE:
 Platform: {lead['platform']}
 Title: {lead['title']}
 Text: {lead['raw_text']}
 
-STRICT RULES:
-1. Score 1-2 if the author is a developer, designer, marketer, or agency advertising their own services ("for hire", "portfolio", "I build", "DM me for services") or generic job board spam.
-2. Score 7-10 ONLY if a client/founder/business is actively looking to hire someone or place an order for app, web, software, graphic design/art, SEO/GEO, social media marketing, or Arduino hardware/software. Give 9-10 if a budget ($) is mentioned.
-3. Write a concise, natural, high-converting outreach reply from CodeXplus (https://codexplus.site) tailored directly to their request.
+SCORING RULES:
+- Score 1 to 3 if the post violates the exclusions above, is a freelancer/agency promoting themselves ("for hire"), or does NOT match the Agent Mission.
+- Score 7 to 10 ONLY if it is a genuine client/buyer matching the Agent Mission. Give 9-10 if a clear budget ($) or urgent timeline is stated.
+- Write a concise, personalized, high-converting outreach reply from CodeXplus (https://codexplus.site) tailored directly to their post.
 
 Respond ONLY in valid JSON:
-{{"score": 8, "summary": "1-sentence summary including budget if stated", "reply": "Direct tailored pitch mentioning https://codexplus.site"}}"""
+{{"score": 8, "summary": "1-sentence summary of what the client needs and budget if stated", "reply": "Tailored outreach message mentioning https://codexplus.site"}}"""
 
     raw = call_gemini(prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
@@ -158,8 +202,11 @@ Respond ONLY in valid JSON:
 
 
 def regenerate_lead_reply(lead: dict) -> str:
+    agent_prompt = get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
     prompt = f"""Write a fresh, concise, high-converting client outreach message from CodeXplus (https://codexplus.site) for this client lead.
-CodeXplus services: Web & Mobile Apps, Custom Software, Graphic Design & Art, Social Media Marketing, SEO/GEO, and Custom Arduino Hardware/Software.
+
+ACTIVE AGENT CONTEXT:
+{agent_prompt}
 
 Platform: {lead.get('platform', '')}
 Title: {lead.get('title', '')}
@@ -170,17 +217,24 @@ Keep it direct, friendly, under 80 words, focused on solving their exact project
 
 
 def fetch_arctic_shift_reddit() -> list[dict]:
-    subreddits = ["forhire", "freelance_forhire", "DesignJobs", "slavelabour", "hiring", "arduino"]
+    subs_raw = get_setting("agent_subreddits", "forhire,freelance_forhire,DesignJobs,slavelabour,hiring,arduino")
+    subreddits = [s.strip().replace("r/", "") for s in subs_raw.split(",") if s.strip()]
+    if not subreddits:
+        subreddits = ["forhire", "freelance_forhire", "DesignJobs", "hiring"]
+
+    kw_raw = get_setting("agent_reddit_keywords", "[hiring],looking to hire,need a,looking for a")
+    keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
+
     items = []
     now_ts = int(time.time())
-    after_ts = now_ts - 7200  # Last 2 hours
+    after_ts = now_ts - 10800  # Last 3 hours
 
     with httpx.Client(timeout=15.0) as client:
-        for sub in subreddits:
+        for sub in subreddits[:8]:
             try:
                 resp = client.get(
                     "https://arctic-shift.photon-reddit.com/api/posts/search",
-                    params={"subreddit": sub, "after": after_ts, "limit": 15, "sort": "desc"},
+                    params={"subreddit": sub, "after": after_ts, "limit": 20, "sort": "desc"},
                 )
                 if resp.status_code != 200:
                     continue
@@ -188,12 +242,12 @@ def fetch_arctic_shift_reddit() -> list[dict]:
                     title = post.get("title", "")
                     body = post.get("selftext", "")
                     num_comments = post.get("num_comments", 0)
-                    if num_comments > 4:
+                    if num_comments > 6:
                         continue
                     lower_title = title.lower()
                     if "[for hire]" in lower_title or "for hire" in lower_title:
                         continue
-                    if "[hiring]" not in lower_title and "looking to hire" not in lower_title and "need" not in lower_title:
+                    if keywords and not any(kw in lower_title for kw in keywords):
                         continue
                     post_id = post.get("id", "")
                     permalink = post.get("permalink", f"/r/{sub}/comments/{post_id}")
@@ -215,15 +269,18 @@ def fetch_arctic_shift_reddit() -> list[dict]:
 def fetch_serper_channels(serper_key: str) -> list[dict]:
     if not serper_key:
         return []
-    custom_x = get_setting("x_query")
+    base_dork = get_setting(
+        "x_query",
+        '("looking to hire" OR "need a developer" OR "need a website" OR "need an app" OR "graphic designer" OR "SEO") ("budget" OR "$") -"for hire"',
+    )
     queries = [
-        ("X", custom_x or '(site:x.com OR site:twitter.com) ("looking to hire" OR "need a developer" OR "need a website" OR "need an app" OR "graphic designer" OR "SEO") ("budget" OR "$") -"for hire"'),
-        ("Threads", 'site:threads.net ("looking to hire" OR "need a website" OR "need an app" OR "graphic designer") -"for hire"'),
-        ("Facebook", 'site:facebook.com ("looking to hire" OR "need a web developer" OR "need an app" OR "digital marketing agency") ("budget" OR "$") -"for hire"'),
-        ("Telegram", 'site:t.me ("looking to hire" OR "need developer" OR "website project" OR "app project") ("budget" OR "$") -"for hire"'),
-        ("Discord", '(site:discord.com OR site:discord.gg) ("looking to hire" OR "paid project" OR "commission" OR "developer needed") ("$" OR "budget") -"for hire"'),
-        ("Twist", 'site:twist.com ("looking to hire" OR "project" OR "developer" OR "designer") ("budget" OR "$")'),
-        ("LinkedIn", 'site:linkedin.com/posts ("looking to hire" OR "need an agency" OR "looking for a developer" OR "website redesign") ("budget" OR "proposal") -"open to work"'),
+        ("X", f"(site:x.com OR site:twitter.com) {base_dork}"),
+        ("Threads", f"site:threads.net {base_dork}"),
+        ("Facebook", f"site:facebook.com {base_dork}"),
+        ("Telegram", f"site:t.me {base_dork}"),
+        ("Discord", f"(site:discord.com OR site:discord.gg) {base_dork}"),
+        ("Twist", f"site:twist.com {base_dork}"),
+        ("LinkedIn", f'site:linkedin.com/posts {base_dork} -"open to work"'),
     ]
     items = []
     with httpx.Client(timeout=15.0) as client:
@@ -256,16 +313,21 @@ def fetch_serper_channels(serper_key: str) -> list[dict]:
     return items
 
 
-def run_sync() -> dict:
+def run_sync(custom_prompt: str | None = None) -> dict:
     serper_key = get_setting("serper_api_key")
     key_pool = get_gemini_key_pool()
+    agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
+    try:
+        min_keep_score = int(get_setting("agent_min_score", "7"))
+    except ValueError:
+        min_keep_score = 7
 
     candidates = fetch_arctic_shift_reddit() + fetch_serper_channels(serper_key)
     conn = get_db()
     cur = conn.cursor()
 
     saved = 0
-    qualified = 0
+    rejected = 0
     notes = []
 
     for item in candidates:
@@ -279,8 +341,11 @@ def run_sync() -> dict:
 
         if key_pool:
             try:
-                score, summary, reply = score_and_draft(item)
+                score, summary, reply = score_and_draft(item, agent_prompt)
                 time.sleep(0.35)
+                if score < min_keep_score:
+                    rejected += 1
+                    continue
             except Exception as exc:
                 notes.append(f"Gemini ({item['external_id']}): {exc}")
         else:
@@ -305,14 +370,12 @@ def run_sync() -> dict:
             ),
         )
         saved += 1
-        if score >= 7:
-            qualified += 1
 
     conn.commit()
     conn.close()
     return {
         "fetched": len(candidates),
         "saved": saved,
-        "qualified": qualified,
+        "rejected": rejected,
         "notes": "; ".join(notes[:3]),
     }

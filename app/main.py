@@ -14,7 +14,10 @@ from app.worker import (
     regenerate_lead_reply,
     get_db,
     get_setting,
+    set_setting,
     test_single_gemini_key,
+    generate_queries_from_prompt,
+    DEFAULT_AGENT_PROMPT,
 )
 
 app = FastAPI(title="CodeXplus Lead Engine")
@@ -89,15 +92,25 @@ class SettingsUpdate(BaseModel):
     gemini_api_key_2: Optional[str] = None
     gemini_api_key_3: Optional[str] = None
     gemini_api_key_4: Optional[str] = None
-    reddit_query: Optional[str] = None
+    agent_prompt: Optional[str] = None
+    agent_subreddits: Optional[str] = None
+    agent_reddit_keywords: Optional[str] = None
+    agent_min_score: Optional[int] = None
     x_query: Optional[str] = None
-    sync_interval_minutes: Optional[int] = None
     admin_username: Optional[str] = None
     admin_password: Optional[str] = None
 
 
 class KeyTestPayload(BaseModel):
     api_key: str
+
+
+class AgentCompilePayload(BaseModel):
+    agent_prompt: str
+
+
+class AgentScanPayload(BaseModel):
+    agent_prompt: Optional[str] = None
 
 
 def serialize_lead(row) -> dict:
@@ -177,10 +190,10 @@ def list_leads(
         params.append(platform)
 
     if has_budget:
-        query += " AND (raw_text LIKE '%$%' OR summary LIKE '%$%' OR LOWER(raw_text) LIKE '%budget%' OR LOWER(summary) LIKE '%budget%')"
+        query += " AND (raw_text LIKE '%$\%' OR summary LIKE '\%$%' OR LOWER(raw_text) LIKE '%budget%' OR LOWER(summary) LIKE '%budget%')"
 
     if region == "usa":
-        query += " AND (LOWER(raw_text) LIKE '%usa%' OR LOWER(raw_text) LIKE '%u.s.%' OR LOWER(raw_text) LIKE '%united states%' OR LOWER(raw_text) LIKE '%est%' OR LOWER(raw_text) LIKE '%pst%' OR LOWER(raw_text) LIKE '%cst%' OR LOWER(raw_text) LIKE '%usd%' OR raw_text LIKE '%$%')"
+        query += " AND (LOWER(raw_text) LIKE '%usa%' OR LOWER(raw_text) LIKE '%u.s.%' OR LOWER(raw_text) LIKE '%united states%' OR LOWER(raw_text) LIKE '%est%' OR LOWER(raw_text) LIKE '%pst%' OR LOWER(raw_text) LIKE '%cst%' OR LOWER(raw_text) LIKE '%usd%' OR raw_text LIKE '%\$%')"
     elif region == "europe":
         query += " AND (LOWER(raw_text) LIKE '%uk%' OR LOWER(raw_text) LIKE '%united kingdom%' OR LOWER(raw_text) LIKE '%europe%' OR LOWER(raw_text) LIKE '%eu%' OR LOWER(raw_text) LIKE '%gbp%' OR LOWER(raw_text) LIKE '%eur%' OR raw_text LIKE '%£%' OR raw_text LIKE '%€%')"
 
@@ -296,36 +309,48 @@ def regenerate_reply(lead_id: int, _user: str = Depends(require_auth)):
 
 
 @app.post("/api/sync")
-def trigger_sync(background_tasks: BackgroundTasks, _user: str = Depends(require_auth)):
-    background_tasks.add_task(run_sync)
+def trigger_sync(
+    background_tasks: BackgroundTasks,
+    payload: Optional[AgentScanPayload] = None,
+    _user: str = Depends(require_auth),
+):
+    prompt_to_use = payload.agent_prompt if payload and payload.agent_prompt else None
+    if prompt_to_use and prompt_to_use.strip():
+        set_setting("agent_prompt", prompt_to_use.strip())
+    background_tasks.add_task(run_sync, prompt_to_use)
     return {
         "fetched": 0,
         "saved": 0,
         "qualified": 0,
-        "notes": "Background sync started! Wait 20-30 seconds and refresh to see new leads.",
+        "notes": "Agent scan started in background! Wait 20-30 seconds and refresh to see filtered leads.",
         "errors": [],
     }
 
 
+@app.post("/api/admin/compile-agent")
+def compile_agent_prompt(payload: AgentCompilePayload, _user: str = Depends(require_auth)):
+    try:
+        compiled = generate_queries_from_prompt(payload.agent_prompt)
+        return {"ok": True, "compiled": compiled}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.get("/api/admin/settings")
 def get_admin_settings(_user: str = Depends(require_auth)):
-    keys = [
-        "serper_api_key",
-        "gemini_api_key_1",
-        "gemini_api_key_2",
-        "gemini_api_key_3",
-        "gemini_api_key_4",
-        "reddit_query",
-        "x_query",
-        "sync_interval_minutes",
-        "admin_username",
-    ]
-    data = {}
-    for k in keys:
-        if k == "admin_username":
-            data[k] = get_setting(k, os.environ.get("ADMIN_USERNAME", "admin"))
-        else:
-            data[k] = get_setting(k, "")
+    data = {
+        "serper_api_key": get_setting("serper_api_key", ""),
+        "gemini_api_key_1": get_setting("gemini_api_key_1", ""),
+        "gemini_api_key_2": get_setting("gemini_api_key_2", ""),
+        "gemini_api_key_3": get_setting("gemini_api_key_3", ""),
+        "gemini_api_key_4": get_setting("gemini_api_key_4", ""),
+        "agent_prompt": get_setting("agent_prompt", DEFAULT_AGENT_PROMPT),
+        "agent_subreddits": get_setting("agent_subreddits", "forhire,freelance_forhire,DesignJobs,slavelabour,hiring,arduino"),
+        "agent_reddit_keywords": get_setting("agent_reddit_keywords", "[hiring],looking to hire,need a,looking for a"),
+        "agent_min_score": int(get_setting("agent_min_score", "7")),
+        "x_query": get_setting("x_query", ""),
+        "admin_username": get_setting("admin_username", os.environ.get("ADMIN_USERNAME", "admin")),
+    }
     return {"settings": data}
 
 
@@ -339,9 +364,11 @@ def save_admin_settings(payload: SettingsUpdate, _user: str = Depends(require_au
         "gemini_api_key_2": payload.gemini_api_key_2,
         "gemini_api_key_3": payload.gemini_api_key_3,
         "gemini_api_key_4": payload.gemini_api_key_4,
-        "reddit_query": payload.reddit_query,
+        "agent_prompt": payload.agent_prompt,
+        "agent_subreddits": payload.agent_subreddits,
+        "agent_reddit_keywords": payload.agent_reddit_keywords,
+        "agent_min_score": str(payload.agent_min_score) if payload.agent_min_score is not None else None,
         "x_query": payload.x_query,
-        "sync_interval_minutes": str(payload.sync_interval_minutes) if payload.sync_interval_minutes is not None else None,
         "admin_username": payload.admin_username.strip() if payload.admin_username else None,
         "admin_password": payload.admin_password if payload.admin_password else None,
     }
