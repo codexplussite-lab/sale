@@ -28,6 +28,15 @@ class SettingsUpdate(BaseModel):
     sync_interval_minutes: Optional[int] = None
 
 
+def serialize_lead(row) -> dict:
+    item = dict(row)
+    post_link = item.get("url") or "#"
+    item["url"] = post_link
+    item["post_url"] = post_link
+    item["link"] = post_link
+    return item
+
+
 @app.get("/")
 def serve_index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
@@ -70,9 +79,8 @@ def list_leads(
 
     query += " ORDER BY created_at DESC LIMIT 200"
     cur.execute(query, params)
-    rows = [dict(row) for row in cur.fetchall()]
+    rows = [serialize_lead(row) for row in cur.fetchall()]
 
-    # Calculate stats expected by the frontend dashboard
     cur.execute("SELECT COUNT(*) FROM leads")
     total_count = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM leads WHERE status = 'new'")
@@ -125,7 +133,7 @@ def update_lead(lead_id: int, payload: LeadUpdate):
 
     conn.commit()
     cur.execute("SELECT * FROM leads WHERE id = ?", (lead_id,))
-    updated = dict(cur.fetchone())
+    updated = serialize_lead(cur.fetchone())
     conn.close()
     return {"lead": updated}
 
@@ -167,7 +175,7 @@ def regenerate_reply(lead_id: int):
         conn.close()
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    lead = dict(row)
+    lead = serialize_lead(row)
     try:
         new_reply = regenerate_lead_reply(lead)
     except Exception as exc:
