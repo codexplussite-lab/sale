@@ -4,7 +4,7 @@ import time
 import base64
 import hashlib
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, Request, Depends
+from fastapi import FastAPI, HTTPException, Query, Request, Depends, BackgroundTasks
 from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -296,12 +296,15 @@ def regenerate_reply(lead_id: int, _user: str = Depends(require_auth)):
 
 
 @app.post("/api/sync")
-def trigger_sync(_user: str = Depends(require_auth)):
-    result = run_sync()
-    notes_str = result.get("notes", "")
-    errors_list = [n.strip() for n in notes_str.split(";") if n.strip()] if notes_str else []
-    result["errors"] = errors_list
-    return result
+def trigger_sync(background_tasks: BackgroundTasks, _user: str = Depends(require_auth)):
+    background_tasks.add_task(run_sync)
+    return {
+        "fetched": 0,
+        "saved": 0,
+        "qualified": 0,
+        "notes": "Background sync started! Wait 20-30 seconds and refresh to see new leads.",
+        "errors": [],
+    }
 
 
 @app.get("/api/admin/settings")
