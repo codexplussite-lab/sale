@@ -1,459 +1,621 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeXplus | Client Acquisition Engine</title>
+  <title>CodeXplus | Client Lead Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            obsidian: '#090b10',
+            surface: '#111520',
+            card: '#161b29',
+            accent: '#6366f1',
+          }
+        }
+      }
+    };
+  </script>
   <style>
-    body {
-      font-family: 'Inter', sans-serif;
-    }
+    body { background-color: #090b10; color: #f1f5f9; font-family: Inter, system-ui, -apple-system, sans-serif; }
+    .glass { background: rgba(22, 27, 41, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(148, 163, 184, 0.12); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
   </style>
 </head>
+<body class="min-h-screen antialiased">
 
-<body class="bg-[#07090e] text-slate-100 min-h-screen selection:bg-indigo-500 selection:text-white">
-  <!-- Top Navbar -->
-  <header class="sticky top-0 z-40 backdrop-blur-xl bg-[#07090e]/85 border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div
-          class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-cyan-400 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/25">
-          CX
+  <!-- LOGIN VIEW -->
+  <div id="loginView" class="hidden min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950/40 via-obsidian to-obsidian">
+    <div class="glass w-full max-w-md rounded-2xl p-8 shadow-2xl">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-indigo-500/30">CX</div>
+        <div>
+          <h1 class="text-xl font-bold text-white tracking-tight">CodeXplus Lead Engine</h1>
+          <p class="text-xs text-slate-400">Sign in to access Leads & Admin Panel</p>
+        </div>
+      </div>
+
+      <div id="loginError" class="hidden mb-4 p-3 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs"></div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">Admin Username</label>
+          <input id="loginUser" type="text" required autocomplete="username" placeholder="admin"
+            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white focus:outline-none focus:border-indigo-500" />
         </div>
         <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold tracking-tight text-white">CodeXplus Lead Engine</h1>
-            <span
-              class="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Live</span>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">Password</label>
+          <input id="loginPass" type="password" required autocomplete="current-password" placeholder="••••••••••••"
+            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <button id="loginBtn" type="submit"
+          class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition shadow-lg shadow-indigo-600/25">
+          Sign In to Workspace
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="appView" class="hidden min-h-screen flex flex-col">
+    <!-- TOP NAVBAR -->
+    <header class="sticky top-0 z-30 glass border-b border-slate-800/80">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/30">CX</div>
+          <div>
+            <span class="font-bold text-white tracking-tight text-base">CodeXplus</span>
+            <span class="hidden sm:inline-block ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Lead Radar</span>
           </div>
-          <p class="text-xs text-slate-400">Real-time client orders &amp; budgets across Reddit, X, Discord, Twist,
-            Threads, FB &amp; Telegram</p>
         </div>
-      </div>
 
-      <div class="flex flex-wrap items-center gap-2.5">
-        <button id="clearFilteredBtn" onclick="bulkDeleteCurrent()"
-          class="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/25 text-xs font-semibold transition">
-          Clear View
-        </button>
-        <button onclick="openSettings()"
-          class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/80 text-xs font-semibold transition">
-          Settings
-        </button>
-        <button id="syncBtn" onclick="triggerSync()"
-          class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-xs font-semibold text-white shadow-lg shadow-indigo-600/25 transition">
-          Run Sync Now
-        </button>
-      </div>
-    </div>
-  </header>
+        <!-- TAB SWITCHER -->
+        <nav class="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+          <button id="tabLeadsBtn" onclick="switchTab('leads')"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white">
+            Leads Feed
+          </button>
+          <button id="tabAdminBtn" onclick="switchTab('admin')"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white">
+            Admin Panel (4 Keys)
+          </button>
+        </nav>
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-    <!-- KPI Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Captured</span>
-          <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+        <div class="flex items-center gap-2.5">
+          <button id="syncBtn" onclick="triggerSync()"
+            class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-emerald-600/20">
+            <span id="syncSpinner" class="hidden animate-spin">⟳</span>
+            <span id="syncBtnText">Run Sync Now</span>
+          </button>
+          <button onclick="logout()"
+            class="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-medium transition border border-slate-700/70">
+            Logout
+          </button>
         </div>
-        <div id="statTotal" class="text-3xl font-bold text-white mt-2">0</div>
       </div>
-      <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Qualified (7+)</span>
-          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-        </div>
-        <div id="statQualified" class="text-3xl font-bold text-emerald-400 mt-2">0</div>
-      </div>
-      <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Pending Review</span>
-          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-        </div>
-        <div id="statPending" class="text-3xl font-bold text-amber-400 mt-2">0</div>
-      </div>
-      <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Replied</span>
-          <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
-        </div>
-        <div id="statReplied" class="text-3xl font-bold text-indigo-400 mt-2">0</div>
+    </header>
+
+    <!-- INLINE STATUS TOAST BANNER -->
+    <div id="statusBanner" class="hidden max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4">
+      <div id="statusBannerBox" class="rounded-xl px-4 py-3 text-xs flex items-center justify-between gap-3 border">
+        <span id="statusBannerText"></span>
+        <button onclick="hideBanner()" class="text-slate-400 hover:text-white font-bold">✕</button>
       </div>
     </div>
 
-    <!-- Platform Quick Pills -->
-    <div class="flex items-center gap-2 overflow-x-auto pb-1">
-      <button onclick="setPlatform('all')" data-plat="all"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-indigo-600 text-white border border-indigo-500 transition">All
-        Channels</button>
-      <button onclick="setPlatform('reddit')" data-plat="reddit"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Reddit</button>
-      <button onclick="setPlatform('x')" data-plat="x"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">X
-        (Twitter)</button>
-      <button onclick="setPlatform('discord')" data-plat="discord"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Discord</button>
-      <button onclick="setPlatform('twist')" data-plat="twist"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Twist</button>
-      <button onclick="setPlatform('threads')" data-plat="threads"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Threads</button>
-      <button onclick="setPlatform('facebook')" data-plat="facebook"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Facebook</button>
-      <button onclick="setPlatform('telegram')" data-plat="telegram"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Telegram</button>
-      <button onclick="setPlatform('linkedin')" data-plat="linkedin"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">LinkedIn</button>
-      <button onclick="setPlatform('hackernews')" data-plat="hackernews"
-        class="plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">Hacker
-        News</button>
-    </div>
-
-    <!-- Filter Bar -->
-    <div
-      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl">
-      <select id="filterStatus" onchange="loadLeads()"
-        class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500">
-        <option value="all">Status: All</option>
-        <option value="pending_review" selected>Status: Pending Review</option>
-        <option value="replied">Status: Replied</option>
-        <option value="archived">Status: Archived</option>
-      </select>
-      <select id="filterRegion" onchange="loadLeads()"
-        class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500">
-        <option value="all">Region: Global</option>
-        <option value="usa">Region: USA Clients</option>
-        <option value="uk_eu">Region: UK / Europe</option>
-      </select>
-      <select id="filterBudget" onchange="loadLeads()"
-        class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500">
-        <option value="false">Budget: Any</option>
-        <option value="true">Budget: Mentioned ($/£/€)</option>
-      </select>
-      <select id="filterScore" onchange="loadLeads()"
-        class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500">
-        <option value="0">Intent Score: All</option>
-        <option value="7" selected>Intent Score: 7+ (High)</option>
-        <option value="5">Intent Score: 5+</option>
-      </select>
-      <input id="filterQuery" oninput="loadLeads()" type="text" placeholder="Search keywords, $, Arduino, web..."
-        class="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
-    </div>
-
-    <!-- Inline Notification Banner -->
-    <div id="toastBanner"
-      class="hidden px-4 py-3 rounded-xl bg-indigo-950/70 border border-indigo-500/40 text-xs text-indigo-100 flex items-center justify-between">
-      <span id="toastText"></span>
-      <button onclick="document.getElementById('toastBanner').classList.add('hidden')"
-        class="text-indigo-300 hover:text-white ml-4 text-base leading-none">&times;</button>
-    </div>
-
-    <!-- Leads Feed -->
-    <div id="leadsContainer" class="grid grid-cols-1 gap-4"></div>
-  </main>
-
-  <!-- Settings Modal -->
-  <div id="settingsModal"
-    class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h2 class="text-base font-bold text-white">Lead Engine Configuration</h2>
-        <button onclick="closeSettings()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
-      </div>
-      <div id="credStatus" class="text-xs text-slate-300 bg-slate-950 border border-slate-800 p-3 rounded-xl"></div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1.5">Reddit Search Query</label>
-        <textarea id="setRedditQuery" rows="2"
-          class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200"></textarea>
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1.5">X / Social Search Query</label>
-        <textarea id="setXQuery" rows="2"
-          class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200"></textarea>
-      </div>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Min Alert Score (1-10)</label>
-          <input id="setMinScore" type="number" min="1" max="10"
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200" />
+    <!-- LEADS FEED VIEW -->
+    <main id="leadsSection" class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
+      <!-- KPI METRICS -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div class="glass rounded-2xl p-4">
+          <p class="text-xs text-slate-400">Total Captured</p>
+          <p id="statTotal" class="text-2xl font-bold text-white mt-1">0</p>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1.5">Sync Interval (Minutes)</label>
-          <input id="setInterval" type="number" min="5" max="1440"
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200" />
+        <div class="glass rounded-2xl p-4">
+          <p class="text-xs text-slate-400">New Unreviewed</p>
+          <p id="statNew" class="text-2xl font-bold text-indigo-400 mt-1">0</p>
+        </div>
+        <div class="glass rounded-2xl p-4">
+          <p class="text-xs text-slate-400">High Intent (Score 7+)</p>
+          <p id="statQualified" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+        </div>
+        <div class="glass rounded-2xl p-4">
+          <p class="text-xs text-slate-400">Replied / Pitched</p>
+          <p id="statReplied" class="text-2xl font-bold text-amber-400 mt-1">0</p>
         </div>
       </div>
-      <div class="flex justify-end gap-2.5 pt-2">
-        <button onclick="closeSettings()"
-          class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium">Cancel</button>
-        <button onclick="saveSettings()"
-          class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white">Save
-          Changes</button>
+
+      <!-- FILTER BAR -->
+      <div class="glass rounded-2xl p-4 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <!-- PLATFORM PILLS -->
+          <div id="platformPills" class="flex flex-wrap items-center gap-1.5">
+            <button data-platform="all" onclick="setPlatform('all')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">All Channels</button>
+            <button data-platform="Reddit" onclick="setPlatform('Reddit')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Reddit</button>
+            <button data-platform="X" onclick="setPlatform('X')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">X / Twitter</button>
+            <button data-platform="Threads" onclick="setPlatform('Threads')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Threads</button>
+            <button data-platform="Facebook" onclick="setPlatform('Facebook')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Facebook</button>
+            <button data-platform="Telegram" onclick="setPlatform('Telegram')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Telegram</button>
+            <button data-platform="Discord" onclick="setPlatform('Discord')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Discord</button>
+            <button data-platform="Twist" onclick="setPlatform('Twist')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Twist</button>
+            <button data-platform="LinkedIn" onclick="setPlatform('LinkedIn')" class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">LinkedIn</button>
+          </div>
+
+          <button id="clearViewBtn" onclick="confirmClearView()"
+            class="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition">
+            Clear View
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80">
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Lead Status</label>
+            <select id="filterStatus" onchange="loadLeads()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-white">
+              <option value="new">New Leads</option>
+              <option value="all">All Statuses</option>
+              <option value="replied">Replied</option>
+              <option value="won">Won / Closed</option>
+              <option value="ignored">Ignored</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Client Region</label>
+            <select id="filterRegion" onchange="loadLeads()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-white">
+              <option value="all">Global (All Regions)</option>
+              <option value="usa">USA Clients (USD / US)</option>
+              <option value="europe">UK & Europe (GBP / EUR)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Minimum AI Score</label>
+            <select id="filterScore" onchange="loadLeads()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-white">
+              <option value="0">All Scores (0+)</option>
+              <option value="7">Qualified Clients (7+)</option>
+              <option value="8">High Budget / Urgent (8+)</option>
+            </select>
+          </div>
+
+          <div class="flex items-end">
+            <label class="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 cursor-pointer select-none">
+              <input id="filterBudget" type="checkbox" onchange="loadLeads()" class="rounded text-indigo-600 focus:ring-0 bg-slate-800 border-slate-600" />
+              <span class="text-xs text-slate-200 font-medium">Has Stated Budget ($)</span>
+            </label>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <!-- LEADS GRID -->
+      <div id="leadsContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+    </main>
+
+    <!-- ADMIN PANEL VIEW -->
+    <section id="adminSection" class="hidden max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
+      <div class="glass rounded-2xl p-6 space-y-6">
+        <div class="border-b border-slate-800 pb-4">
+          <h2 class="text-lg font-bold text-white">Admin Panel — API Keys & Failover Pool</h2>
+          <p class="text-xs text-slate-400 mt-1">Configure up to 4 Gemini API keys. If Key #1 hits quota or fails, the engine automatically switches to Key #2, #3, and #4.</p>
+        </div>
+
+        <!-- 4 GEMINI KEYS GRID -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-indigo-300">Gemini API Key #1 (Primary)</label>
+              <button type="button" onclick="testKey(1)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test Key</button>
+            </div>
+            <input id="geminiKey1" type="password" placeholder="AIzaSy..." class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
+            <p id="keyStatus1" class="text-[11px] text-slate-400">Ready</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-indigo-300">Gemini API Key #2 (Failover 1)</label>
+              <button type="button" onclick="testKey(2)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test Key</button>
+            </div>
+            <input id="geminiKey2" type="password" placeholder="AIzaSy..." class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
+            <p id="keyStatus2" class="text-[11px] text-slate-400">Ready</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-indigo-300">Gemini API Key #3 (Failover 2)</label>
+              <button type="button" onclick="testKey(3)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test Key</button>
+            </div>
+            <input id="geminiKey3" type="password" placeholder="AIzaSy..." class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
+            <p id="keyStatus3" class="text-[11px] text-slate-400">Ready</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-indigo-300">Gemini API Key #4 (Failover 3)</label>
+              <button type="button" onclick="testKey(4)" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test Key</button>
+            </div>
+            <input id="geminiKey4" type="password" placeholder="AIzaSy..." class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
+            <p id="keyStatus4" class="text-[11px] text-slate-400">Ready</p>
+          </div>
+        </div>
+
+        <!-- SERPER & SEARCH CONFIG -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Serper.dev API Key (Social & Web Search)</label>
+            <input id="serperKey" type="password" placeholder="Your Serper API Key" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Custom X / Social Dork Query (Optional)</label>
+            <input id="xQuery" type="text" placeholder="Leave blank to use built-in multi-channel dorks" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+          </div>
+        </div>
+
+        <!-- ADMIN CREDENTIALS UPDATE -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Admin Username</label>
+            <input id="adminUsername" type="text" placeholder="admin" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">New Admin Password (Leave blank to keep current)</label>
+            <input id="adminPassword" type="password" placeholder="••••••••••••" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-2">
+          <button onclick="saveAdminSettings()"
+            class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-lg shadow-indigo-600/25">
+            Save All Admin Settings
+          </button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script>
     let currentPlatform = 'all';
+    let clearArmed = false;
 
-    const PLATFORM_BADGES = {
-      reddit: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
-      x: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-      discord: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-      twist: 'bg-teal-500/15 text-teal-300 border-teal-500/30',
-      threads: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30',
-      facebook: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-      telegram: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-      linkedin: 'bg-blue-600/15 text-blue-200 border-blue-500/30',
-      hackernews: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    };
+    function showBanner(msg, type = 'info') {
+      const el = document.getElementById('statusBanner');
+      const box = document.getElementById('statusBannerBox');
+      const txt = document.getElementById('statusBannerText');
+      el.classList.remove('hidden');
+      txt.textContent = msg;
+      box.className = 'rounded-xl px-4 py-3 text-xs flex items-center justify-between gap-3 border ' + (
+        type === 'error'
+          ? 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+          : type === 'success'
+          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+          : 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
+      );
+    }
 
-    function showToast(msg) {
-      const banner = document.getElementById('toastBanner');
-      document.getElementById('toastText').textContent = msg;
-      banner.classList.remove('hidden');
+    function hideBanner() {
+      document.getElementById('statusBanner').classList.add('hidden');
+    }
+
+    async function checkAuth() {
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      if (data.authenticated) {
+        document.getElementById('loginView').classList.add('hidden');
+        document.getElementById('appView').classList.remove('hidden');
+        await loadLeads();
+        await loadAdminSettings();
+      } else {
+        document.getElementById('appView').classList.add('hidden');
+        document.getElementById('loginView').classList.remove('hidden');
+      }
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('loginError');
+      errBox.classList.add('hidden');
+      const username = document.getElementById('loginUser').value;
+      const password = document.getElementById('loginPass').value;
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Login failed' }));
+        errBox.textContent = err.detail || 'Invalid credentials';
+        errBox.classList.remove('hidden');
+        return;
+      }
+      await checkAuth();
+    });
+
+    async function logout() {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      await checkAuth();
+    }
+
+    function switchTab(tab) {
+      const isLeads = tab === 'leads';
+      document.getElementById('leadsSection').classList.toggle('hidden', !isLeads);
+      document.getElementById('adminSection').classList.toggle('hidden', isLeads);
+      document.getElementById('tabLeadsBtn').className = isLeads
+        ? 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white'
+        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white';
+      document.getElementById('tabAdminBtn').className = !isLeads
+        ? 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white'
+        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white';
     }
 
     function setPlatform(plat) {
       currentPlatform = plat;
       document.querySelectorAll('.plat-pill').forEach(btn => {
-        const active = btn.dataset.plat === plat;
+        const active = btn.dataset.platform === plat;
         btn.className = active
-          ? 'plat-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-indigo-600 text-white border border-indigo-500 transition'
-          : 'plat-pill px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition';
+          ? 'plat-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white'
+          : 'plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700';
       });
       loadLeads();
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     async function loadLeads() {
       const status = document.getElementById('filterStatus').value;
       const region = document.getElementById('filterRegion').value;
-      const has_budget = document.getElementById('filterBudget').value;
       const minScore = document.getElementById('filterScore').value;
-      const q = document.getElementById('filterQuery').value;
+      const hasBudget = document.getElementById('filterBudget').checked;
+
       const params = new URLSearchParams({
         status,
         platform: currentPlatform,
-        region,
-        has_budget,
         min_score: minScore,
-        q
+        region,
+        has_budget: hasBudget
       });
 
       const res = await fetch('/api/leads?' + params.toString());
+      if (res.status === 401) return checkAuth();
       const data = await res.json();
 
-      document.getElementById('statTotal').textContent = data.stats.total;
-      document.getElementById('statQualified').textContent = data.stats.qualified;
-      document.getElementById('statPending').textContent = data.stats.pending;
-      document.getElementById('statReplied').textContent = data.stats.replied;
+      const stats = data.stats || {};
+      document.getElementById('statTotal').textContent = stats.total ?? 0;
+      document.getElementById('statNew').textContent = stats.new ?? 0;
+      document.getElementById('statQualified').textContent = stats.qualified ?? 0;
+      document.getElementById('statReplied').textContent = stats.replied ?? 0;
 
       const container = document.getElementById('leadsContainer');
-      if (!data.leads.length) {
-        container.innerHTML = `
-          <div class="text-center py-16 px-4 bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl">
-            <p class="text-sm font-medium text-slate-300">No leads match the current filters</p>
-            <p class="text-xs text-slate-500 mt-1">Switch Intent Score to "All" or click "Run Sync Now" to pull fresh posts.</p>
-          </div>`;
+      const leads = data.leads || [];
+      if (!leads.length) {
+        container.innerHTML = '<div class="col-span-full glass rounded-2xl p-10 text-center text-sm text-slate-400">No leads match the active filters. Click <strong>Run Sync Now</strong> to pull fresh leads.</div>';
         return;
       }
 
-      container.innerHTML = data.leads.map(lead => {
-        const badgeStyle = PLATFORM_BADGES[lead.platform] || 'bg-slate-800 text-slate-300 border-slate-700';
-        const scoreStyle = lead.intent_score >= 8
-          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-          : lead.intent_score >= 7
-            ? 'bg-teal-500/15 text-teal-300 border-teal-500/30'
-            : 'bg-slate-800 text-slate-300 border-slate-700';
+      container.innerHTML = leads.map(lead => {
+        const scoreColor = lead.score >= 8
+          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+          : lead.score >= 6
+          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+          : 'bg-slate-700/40 text-slate-300 border-slate-600/40';
+        const postUrl = lead.post_url || lead.url || '#';
 
         return `
-        <article class="bg-slate-900/70 border border-slate-800/90 hover:border-slate-700/90 rounded-2xl p-5 sm:p-6 transition shadow-lg shadow-black/20 space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wide border ${badgeStyle}">${escapeHtml(lead.platform)}</span>
-              <span class="px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${scoreStyle}">Score ${lead.intent_score}/10</span>
-              <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20">${escapeHtml(lead.project_category || 'general')}</span>
-              <span class="text-xs font-medium text-slate-400">${escapeHtml(lead.author_handle || '')}</span>
+          <article id="lead-card-${lead.id}" class="glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+            <div class="space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${escapeHtml(lead.platform)}</span>
+                  <span class="px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${scoreColor}">Score ${lead.score}/10</span>
+                  <span class="text-[11px] text-slate-400">by ${escapeHtml(lead.author)}</span>
+                </div>
+                <a href="${escapeHtml(postUrl)}" target="_blank" rel="noopener noreferrer"
+                   class="shrink-0 text-xs font-semibold text-indigo-400 hover:text-indigo-300 underline underline-offset-2">
+                  Original Post ↗
+                </a>
+              </div>
+
+              <div>
+                <h3 class="text-sm font-bold text-white leading-snug">${escapeHtml(lead.title)}</h3>
+                <p class="text-xs text-emerald-300/90 mt-1">${escapeHtml(lead.summary)}</p>
+              </div>
+
+              <p class="text-xs text-slate-400 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 max-h-24 overflow-y-auto whitespace-pre-line">${escapeHtml(lead.raw_text)}</p>
+
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <label class="text-[11px] font-semibold text-slate-300">AI Client Pitch (Gemini)</label>
+                  <button onclick="regenerateReply(${lead.id}, this)"
+                    class="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-semibold transition">
+                    ↻ Regenerate Reply
+                  </button>
+                </div>
+                <textarea id="reply-${lead.id}" rows="3"
+                  class="w-full p-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">${escapeHtml(lead.suggested_reply)}</textarea>
+              </div>
             </div>
-            <div class="flex items-center gap-3">
-              <a href="${escapeHtml(lead.post_url)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300">
-                Open Original Post <span>&nearr;</span>
-              </a>
-              <button id="del-${lead.id}" onclick="deleteLead(${lead.id})" class="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/25 text-[11px] font-semibold transition">
+
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
+              <div class="flex items-center gap-1.5">
+                <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white">Copy Pitch</button>
+                <button onclick="markStatus(${lead.id}, 'replied')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">Mark Replied</button>
+                <button onclick="markStatus(${lead.id}, 'ignored')" class="px-2.5 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-400 text-xs">Ignore</button>
+              </div>
+              <button onclick="deleteLead(${lead.id}, this)" data-armed="false"
+                class="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition">
                 Delete
               </button>
             </div>
-          </div>
-
-          <div class="space-y-1.5">
-            <h3 id="summary-${lead.id}" class="text-sm sm:text-base font-semibold text-white leading-snug">${escapeHtml(lead.pain_point_summary || '')}</h3>
-            <p class="text-xs text-slate-400 whitespace-pre-line line-clamp-4 leading-relaxed bg-slate-950/60 border border-slate-800/70 rounded-xl p-3">${escapeHtml(lead.raw_text || '')}</p>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">CodeXplus Gemini Pitch</label>
-              <button id="regen-${lead.id}" onclick="regenerateReply(${lead.id})" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition">
-                &#8635; Regenerate Reply
-              </button>
-            </div>
-            <textarea id="reply-${lead.id}" rows="3" class="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl p-3 text-xs sm:text-sm text-slate-200 leading-relaxed">${escapeHtml(lead.drafted_reply || '')}</textarea>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <button onclick="copyReply(${lead.id})" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
-                Copy Reply
-              </button>
-              <button onclick="updateLead(${lead.id}, 'replied')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition">
-                Save &amp; Mark Replied
-              </button>
-              <button onclick="updateLead(${lead.id}, 'archived')" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-medium text-slate-400 transition">
-                Archive
-              </button>
-            </div>
-          </div>
-        </article>`;
+          </article>
+        `;
       }).join('');
     }
 
-    function escapeHtml(str) {
-      return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-    }
-
     async function copyReply(id) {
-      const el = document.getElementById('reply-' + id);
-      el.select();
-      document.execCommand('copy');
-      showToast('Reply copied to clipboard.');
+      const txt = document.getElementById(`reply-${id}`).value;
+      await navigator.clipboard.writeText(txt);
+      showBanner('Outreach message copied to clipboard.', 'success');
     }
 
-    async function regenerateReply(id) {
-      const btn = document.getElementById('regen-' + id);
-      btn.disabled = true;
-      btn.textContent = 'Generating...';
-      try {
-        const res = await fetch('/api/leads/' + id + '/regenerate', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) {
-          showToast(data.detail || 'Failed to regenerate reply.');
-          return;
-        }
-        document.getElementById('reply-' + id).value = data.drafted_reply || '';
-        if (data.pain_point_summary) {
-          document.getElementById('summary-' + id).textContent = data.pain_point_summary;
-        }
-        showToast('Fresh Gemini reply generated.');
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '&#8635; Regenerate Reply';
+    async function markStatus(id, status) {
+      const suggested_reply = document.getElementById(`reply-${id}`).value;
+      const res = await fetch(`/api/leads/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, suggested_reply })
+      });
+      if (res.ok) {
+        showBanner(`Lead #${id} marked as ${status}.`, 'success');
+        loadLeads();
       }
     }
 
-    async function updateLead(id, status) {
-      const drafted_reply = document.getElementById('reply-' + id).value;
-      await fetch('/api/leads/' + id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, drafted_reply })
-      });
-      showToast('Lead updated.');
-      loadLeads();
+    async function regenerateReply(id, btn) {
+      const orig = btn.textContent;
+      btn.textContent = 'Generating...';
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/leads/${id}/regenerate`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          showBanner(data.detail || 'Failed to regenerate reply.', 'error');
+        } else {
+          document.getElementById(`reply-${id}`).value = data.suggested_reply;
+          showBanner('Generated fresh Gemini outreach reply.', 'success');
+        }
+      } finally {
+        btn.textContent = orig;
+        btn.disabled = false;
+      }
     }
 
-    async function deleteLead(id) {
-      const btn = document.getElementById('del-' + id);
+    async function deleteLead(id, btn) {
       if (btn.dataset.armed !== 'true') {
         btn.dataset.armed = 'true';
-        btn.textContent = 'Confirm Delete?';
+        btn.textContent = 'Confirm Delete';
+        btn.classList.add('bg-rose-600', 'text-white');
         setTimeout(() => {
           if (btn) {
             btn.dataset.armed = 'false';
             btn.textContent = 'Delete';
+            btn.classList.remove('bg-rose-600', 'text-white');
           }
-        }, 3000);
+        }, 3500);
         return;
       }
-      await fetch('/api/leads/' + id, { method: 'DELETE' });
-      showToast('Lead permanently deleted.');
-      loadLeads();
+      const res = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showBanner(`Lead #${id} deleted.`, 'success');
+        loadLeads();
+      }
     }
 
-    async function bulkDeleteCurrent() {
-      const btn = document.getElementById('clearFilteredBtn');
-      const status = document.getElementById('filterStatus').value;
-      if (btn.dataset.armed !== 'true') {
-        btn.dataset.armed = 'true';
-        btn.textContent = `Confirm Clear (${status})?`;
+    async function confirmClearView() {
+      const btn = document.getElementById('clearViewBtn');
+      if (!clearArmed) {
+        clearArmed = true;
+        btn.textContent = 'Click Again to Confirm Clear';
         setTimeout(() => {
-          btn.dataset.armed = 'false';
+          clearArmed = false;
           btn.textContent = 'Clear View';
-        }, 3000);
+        }, 3500);
         return;
       }
-      btn.dataset.armed = 'false';
+      clearArmed = false;
       btn.textContent = 'Clear View';
-      const res = await fetch('/api/leads?status=' + encodeURIComponent(status), { method: 'DELETE' });
-      const data = await res.json();
-      showToast(`Deleted ${data.deleted} leads.`);
-      loadLeads();
+      const status = document.getElementById('filterStatus').value;
+      const res = await fetch(`/api/leads?status=${encodeURIComponent(status)}`, { method: 'DELETE' });
+      if (res.ok) {
+        const data = await res.json();
+        showBanner(`Deleted ${data.deleted_count} leads from view.`, 'success');
+        loadLeads();
+      }
     }
 
     async function triggerSync() {
       const btn = document.getElementById('syncBtn');
+      const spin = document.getElementById('syncSpinner');
+      const txt = document.getElementById('syncBtnText');
       btn.disabled = true;
-      btn.textContent = 'Syncing...';
+      spin.classList.remove('hidden');
+      txt.textContent = 'Syncing...';
       try {
         const res = await fetch('/api/sync', { method: 'POST' });
-        const result = await res.json();
-        showToast(
-          `Sync complete: fetched ${result.fetched}, saved ${result.saved}, qualified ${result.qualified}` +
-          (result.errors.length ? ` | Notes: ${result.errors.join('; ')}` : '')
-        );
-        loadLeads();
+        const data = await res.json();
+        const notePart = data.notes ? ` | Notes: ${data.notes}` : '';
+        showBanner(`Sync complete: fetched ${data.fetched}, saved ${data.saved}, qualified ${data.qualified}${notePart}`, data.notes ? 'info' : 'success');
+        await loadLeads();
+      } catch (err) {
+        showBanner('Sync error: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Run Sync Now';
+        spin.classList.add('hidden');
+        txt.textContent = 'Run Sync Now';
       }
     }
 
-    async function openSettings() {
-      const res = await fetch('/api/settings');
-      const data = await res.json();
-      document.getElementById('setRedditQuery').value = data.reddit_query || '';
-      document.getElementById('setXQuery').value = data.x_query || '';
-      document.getElementById('setMinScore').value = data.min_intent_score || 7;
-      document.getElementById('setInterval').value = data.sync_interval_minutes || 20;
-      const c = data.configured;
-      document.getElementById('credStatus').innerHTML =
-        `API Keys (.env): Gemini ${c.gemini ? '✅' : '❌'} | Serper ${c.serper ? '✅' : '❌'} | X ${c.x ? '✅' : '❌'} | Discord ${c.discord ? '✅' : '❌'}`;
-      document.getElementById('settingsModal').classList.remove('hidden');
+    async function loadAdminSettings() {
+      const res = await fetch('/api/admin/settings');
+      if (!res.ok) return;
+      const { settings } = await res.json();
+      document.getElementById('geminiKey1').value = settings.gemini_api_key_1 || '';
+      document.getElementById('geminiKey2').value = settings.gemini_api_key_2 || '';
+      document.getElementById('geminiKey3').value = settings.gemini_api_key_3 || '';
+      document.getElementById('geminiKey4').value = settings.gemini_api_key_4 || '';
+      document.getElementById('serperKey').value = settings.serper_api_key || '';
+      document.getElementById('xQuery').value = settings.x_query || '';
+      document.getElementById('adminUsername').value = settings.admin_username || 'admin';
     }
 
-    function closeSettings() {
-      document.getElementById('settingsModal').classList.add('hidden');
-    }
-
-    async function saveSettings() {
-      await fetch('/api/settings', {
-        method: 'PUT',
+    async function testKey(index) {
+      const val = document.getElementById(`geminiKey${index}`).value.trim();
+      const statusEl = document.getElementById(`keyStatus${index}`);
+      statusEl.textContent = 'Testing key...';
+      statusEl.className = 'text-[11px] text-indigo-300';
+      const res = await fetch('/api/admin/test-gemini-key', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reddit_query: document.getElementById('setRedditQuery').value,
-          x_query: document.getElementById('setXQuery').value,
-          min_intent_score: Number(document.getElementById('setMinScore').value),
-          sync_interval_minutes: Number(document.getElementById('setInterval').value)
-        })
+        body: JSON.stringify({ api_key: val })
       });
-      closeSettings();
-      showToast('Settings saved.');
+      const data = await res.json();
+      statusEl.textContent = data.detail;
+      statusEl.className = data.ok ? 'text-[11px] text-emerald-400' : 'text-[11px] text-rose-400';
     }
 
-    loadLeads();
+    async function saveAdminSettings() {
+      const payload = {
+        gemini_api_key_1: document.getElementById('geminiKey1').value.trim(),
+        gemini_api_key_2: document.getElementById('geminiKey2').value.trim(),
+        gemini_api_key_3: document.getElementById('geminiKey3').value.trim(),
+        gemini_api_key_4: document.getElementById('geminiKey4').value.trim(),
+        serper_api_key: document.getElementById('serperKey').value.trim(),
+        x_query: document.getElementById('xQuery').value.trim(),
+        admin_username: document.getElementById('adminUsername').value.trim(),
+        admin_password: document.getElementById('adminPassword').value || null
+      };
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        document.getElementById('adminPassword').value = '';
+        showBanner('Admin settings & 4-key Gemini failover pool saved.', 'success');
+      } else {
+        showBanner('Failed to save admin settings.', 'error');
+      }
+    }
+
+    checkAuth();
   </script>
 </body>
-
 </html>

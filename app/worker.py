@@ -47,23 +47,51 @@ def get_db():
 
 
 def get_setting(key: str, default: str = "") -> str:
-    env_val = os.environ.get(key.upper(), "")
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
     row = cur.fetchone()
     conn.close()
-    if row and row["value"]:
-        return row["value"]
-    return env_val or default
+    if row and row["value"] is not None and str(row["value"]).strip() != "":
+        return str(row["value"]).strip()
+    env_val = os.environ.get(key.upper(), "")
+    if env_val and env_val.strip():
+        return env_val.strip()
+    return default
 
 
-def call_gemini(prompt: str, api_key: str) -> str:
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    last_err = ""
-    for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        for attempt in range(3):
+def get_gemini_key_pool() -> list[tuple[str, str]]:
+    """Collect up to 4 configured Gemini API keys (DB settings override .env)."""
+    pool = []
+    seen = set()
+    for idx in range(1, 5):
+        k_name = f"gemini_api_key_{idx}"
+        val = get_setting(k_name)
+        if val and val not in seen:
+            pool.append((f"Key #{idx}", val))
+            seen.add(val)
+    legacy = get_setting("gemini_api_key")
+    if legacy and legacy not in seen:
+        pool.append(("Legacy Key", legacy))
+        seen.add(legacy)
+    return pool
+
+
+def call_gemini(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
+    """
+    Rotates automatically across all configured Gemini keys (Key #1 -> #2 -> #3 -> #4)
+    and active Gemini 2.5 models if any key hits 429 quota, 403/400 invalid key, or 503 overload.
+    """
+    keys = override_keys if override_keys is not None else get_gemini_key_pool()
+    if not keys:
+        raise RuntimeError("No Gemini API keys configured. Add Key #1-#4 in Admin Panel or .env.")
+
+    models = ["gemini-3.8-flash", "gemini-3.8-pro", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro"]
+    errors = []
+
+    for key_label, api_key in keys:
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
                 with httpx.Client(timeout=25.0) as client:
                     resp = client.post(
@@ -72,21 +100,37 @@ def call_gemini(prompt: str, api_key: str) -> str:
                     )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                last_err = f"{model} HTTP {resp.status_code}: {resp.text[:120]}"
-                if resp.status_code in (429, 503):
-                    time.sleep(2 * (attempt + 1))
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        return candidates[0]["content"]["parts"][0]["text"].strip()
+                    errors.append(f"{key_label} ({model}): Empty response")
                     continue
-                break
+
+                err_msg = resp.text[:140].replace("\n", " ")
+                errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
+                # If key itself is invalid/quota-exceeded (400, 401, 403, 429), immediately fail over to next key
+                if resp.status_code in (400, 401, 403, 429):
+                    break
             except Exception as exc:
-                last_err = str(exc)
-                time.sleep(1)
-    raise RuntimeError(f"Gemini failed: {last_err}")
+                errors.append(f"{key_label} ({model}): {exc}")
+                continue
+
+    raise RuntimeError("All Gemini keys failed -> " + " | ".join(errors[:4]))
 
 
-def score_and_draft(lead: dict, api_key: str) -> tuple[int, str, str]:
-    prompt = f"""You are a lead qualification assistant for CodeXplus (codexplus.site), a full-stack software house offering:
-- Mobile App & Web Application Development (Next.js, React, Node.js, Custom Software)
+def test_single_gemini_key(api_key: str) -> dict:
+    if not api_key or not api_key.strip():
+        return {"ok": False, "detail": "Empty key"}
+    try:
+        out = call_gemini("Reply with the single word: OK", [("Test Key", api_key.strip())])
+        return {"ok": True, "detail": f"Active ({out[:20]})"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:160]}
+
+
+def score_and_draft(lead: dict) -> tuple[int, str, str]:
+    prompt = f"""You are a lead qualification assistant for CodeXplus (https://codexplus.site), a full-stack software house offering:
+- Mobile App & Web Application Development (Next.js, React, Node.js, Python, Custom Software)
 - Graphic Design & Digital Art
 - Social Media Marketing, SEO & GEO (Generative Engine Optimization)
 - Arduino Hardware & Embedded Software Prototyping on client demand
@@ -97,14 +141,14 @@ Title: {lead['title']}
 Text: {lead['raw_text']}
 
 STRICT RULES:
-1. Score 1-2 if the author is a developer, designer, marketer, or agency advertising their own services ("for hire", "portfolio", "I build", "DM me for services") or a generic full-time job board spam.
+1. Score 1-2 if the author is a developer, designer, marketer, or agency advertising their own services ("for hire", "portfolio", "I build", "DM me for services") or generic job board spam.
 2. Score 7-10 ONLY if a client/founder/business is actively looking to hire someone or place an order for app, web, software, graphic design/art, SEO/GEO, social media marketing, or Arduino hardware/software. Give 9-10 if a budget ($) is mentioned.
-3. Write a concise, natural, non-spammy outreach reply from CodeXplus (codexplus.site) tailored directly to their request.
+3. Write a concise, natural, high-converting outreach reply from CodeXplus (https://codexplus.site) tailored directly to their request.
 
 Respond ONLY in valid JSON:
-{{"score": 8, "summary": "1-sentence summary including budget if stated", "reply": "Direct tailored pitch mentioning codexplus.site"}}"""
+{{"score": 8, "summary": "1-sentence summary including budget if stated", "reply": "Direct tailored pitch mentioning https://codexplus.site"}}"""
 
-    raw = call_gemini(prompt, api_key)
+    raw = call_gemini(prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     score = int(parsed.get("score", 1))
@@ -114,10 +158,7 @@ Respond ONLY in valid JSON:
 
 
 def regenerate_lead_reply(lead: dict) -> str:
-    api_key = get_setting("gemini_api_key")
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured in Settings or .env.")
-    prompt = f"""Write a fresh, concise, high-converting client outreach message from CodeXplus (codexplus.site) for this client lead.
+    prompt = f"""Write a fresh, concise, high-converting client outreach message from CodeXplus (https://codexplus.site) for this client lead.
 CodeXplus services: Web & Mobile Apps, Custom Software, Graphic Design & Art, Social Media Marketing, SEO/GEO, and Custom Arduino Hardware/Software.
 
 Platform: {lead.get('platform', '')}
@@ -125,14 +166,14 @@ Title: {lead.get('title', '')}
 Post: {lead.get('raw_text', '')}
 
 Keep it direct, friendly, under 80 words, focused on solving their exact project, and include https://codexplus.site naturally. Return only the reply text."""
-    return call_gemini(prompt, api_key)
+    return call_gemini(prompt)
 
 
 def fetch_arctic_shift_reddit() -> list[dict]:
     subreddits = ["forhire", "freelance_forhire", "DesignJobs", "slavelabour", "hiring", "arduino"]
     items = []
     now_ts = int(time.time())
-    after_ts = now_ts - 3600
+    after_ts = now_ts - 7200  # Last 2 hours
 
     with httpx.Client(timeout=15.0) as client:
         for sub in subreddits:
@@ -147,7 +188,7 @@ def fetch_arctic_shift_reddit() -> list[dict]:
                     title = post.get("title", "")
                     body = post.get("selftext", "")
                     num_comments = post.get("num_comments", 0)
-                    if num_comments > 3:
+                    if num_comments > 4:
                         continue
                     lower_title = title.lower()
                     if "[for hire]" in lower_title or "for hire" in lower_title:
@@ -174,8 +215,9 @@ def fetch_arctic_shift_reddit() -> list[dict]:
 def fetch_serper_channels(serper_key: str) -> list[dict]:
     if not serper_key:
         return []
+    custom_x = get_setting("x_query")
     queries = [
-        ("X", '(site:x.com OR site:twitter.com) ("looking to hire" OR "need a developer" OR "need a website" OR "need an app" OR "graphic designer" OR "SEO") ("budget" OR "$") -"for hire"'),
+        ("X", custom_x or '(site:x.com OR site:twitter.com) ("looking to hire" OR "need a developer" OR "need a website" OR "need an app" OR "graphic designer" OR "SEO") ("budget" OR "$") -"for hire"'),
         ("Threads", 'site:threads.net ("looking to hire" OR "need a website" OR "need an app" OR "graphic designer") -"for hire"'),
         ("Facebook", 'site:facebook.com ("looking to hire" OR "need a web developer" OR "need an app" OR "digital marketing agency") ("budget" OR "$") -"for hire"'),
         ("Telegram", 'site:t.me ("looking to hire" OR "need developer" OR "website project" OR "app project") ("budget" OR "$") -"for hire"'),
@@ -216,7 +258,7 @@ def fetch_serper_channels(serper_key: str) -> list[dict]:
 
 def run_sync() -> dict:
     serper_key = get_setting("serper_api_key")
-    gemini_key = get_setting("gemini_api_key")
+    key_pool = get_gemini_key_pool()
 
     candidates = fetch_arctic_shift_reddit() + fetch_serper_channels(serper_key)
     conn = get_db()
@@ -235,12 +277,14 @@ def run_sync() -> dict:
         summary = item["title"]
         reply = ""
 
-        if gemini_key:
+        if key_pool:
             try:
-                score, summary, reply = score_and_draft(item, gemini_key)
-                time.sleep(0.4)
+                score, summary, reply = score_and_draft(item)
+                time.sleep(0.35)
             except Exception as exc:
                 notes.append(f"Gemini ({item['external_id']}): {exc}")
+        else:
+            notes.append("No Gemini API keys configured.")
 
         cur.execute(
             """
