@@ -140,16 +140,26 @@
       <!-- LIVE AGENT MISSION PROMPT BOX -->
       <div
         class="glass rounded-2xl p-5 border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 via-slate-900/80 to-slate-900/80 space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="text-sm font-bold text-white flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               Active Lead Hunter Agent Prompt
             </h2>
-            <p class="text-[11px] text-slate-400">Tell the agent exactly what clients to find and what to reject. Posts
-              below your quality threshold are automatically discarded.</p>
+            <p class="text-[11px] text-slate-400">Targeting real clients across Web/App Dev, E-Commerce, ERP, UI/UX, Video/Reels, and SMM/SEO.</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- POST FRESHNESS SELECTOR -->
+            <div class="flex items-center gap-1.5 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-700/80">
+              <span class="text-[11px] text-slate-400 font-medium">Freshness:</span>
+              <select id="quickFreshness" title="Search Post Freshness"
+                class="bg-transparent text-xs text-indigo-300 font-semibold focus:outline-none cursor-pointer">
+                <option value="qdr:d" selected class="bg-slate-900 text-white">Last 24 Hours (qdr:d)</option>
+                <option value="qdr:w" class="bg-slate-900 text-white">Last 7 Days (qdr:w)</option>
+                <option value="qdr:m" class="bg-slate-900 text-white">Last 30 Days (qdr:m)</option>
+              </select>
+            </div>
+
             <button type="button" onclick="autoCompileFromDashboard()" id="quickCompileBtn"
               class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition">
               ✦ Update Search Dorks
@@ -162,7 +172,7 @@
           </div>
         </div>
         <textarea id="quickAgentPrompt" rows="3"
-          placeholder="Example: Find founders or businesses looking to hire a React/Next.js or mobile app developer with a budget over $500. Reject all freelancers advertising themselves, crypto spam, and unpaid jobs."
+          placeholder="Example: Find startup founders or businesses looking to hire for Web/App Dev (Next.js/React), Shopify E-Commerce, Custom ERP/Portals, UI/UX Branding, Video/Reels, or SMM/SEO. Reject all freelancers promoting themselves."
           class="w-full p-3 rounded-xl bg-slate-950/90 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
       </div>
 
@@ -198,6 +208,8 @@
             <button data-platform="X" onclick="setPlatform('X')"
               class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">X
               / Twitter</button>
+            <button data-platform="LinkedIn" onclick="setPlatform('LinkedIn')"
+              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">LinkedIn</button>
             <button data-platform="Threads" onclick="setPlatform('Threads')"
               class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Threads</button>
             <button data-platform="Facebook" onclick="setPlatform('Facebook')"
@@ -208,8 +220,6 @@
               class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Discord</button>
             <button data-platform="Twist" onclick="setPlatform('Twist')"
               class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Twist</button>
-            <button data-platform="LinkedIn" onclick="setPlatform('LinkedIn')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">LinkedIn</button>
           </div>
 
           <button id="clearViewBtn" onclick="confirmClearView()"
@@ -218,16 +228,19 @@
           </button>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80">
+        <!-- 5-COLUMN DASHBOARD FILTERS -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t border-slate-800/80">
           <div>
-            <label class="block text-[11px] text-slate-400 mb-1">Lead Status</label>
-            <select id="filterStatus" onchange="loadLeads()"
+            <label class="block text-[11px] text-slate-400 mb-1">Service Category</label>
+            <select id="filterService" onchange="loadLeads()"
               class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-white">
-              <option value="new">New Leads</option>
-              <option value="all">All Statuses</option>
-              <option value="replied">Replied</option>
-              <option value="won">Won / Closed</option>
-              <option value="ignored">Ignored</option>
+              <option value="all">All 6 Services</option>
+              <option value="Web/App Dev">Web/App Dev</option>
+              <option value="E-Commerce">E-Commerce</option>
+              <option value="ERP/Portal">ERP/Portal</option>
+              <option value="UI/UX & Branding">UI/UX & Branding</option>
+              <option value="Video/Reels">Video/Reels</option>
+              <option value="SMM/SEO">SMM/SEO</option>
             </select>
           </div>
 
@@ -238,6 +251,20 @@
               <option value="all">Global (All Regions)</option>
               <option value="usa">USA Clients (USD / US)</option>
               <option value="europe">UK & Europe (GBP / EUR)</option>
+              <option value="gulf">UAE & Gulf (AED / SAR)</option>
+              <option value="pakistan">Pakistan (PKR / Local)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Lead Status</label>
+            <select id="filterStatus" onchange="loadLeads()"
+              class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-white">
+              <option value="new">New Leads</option>
+              <option value="all">All Statuses</option>
+              <option value="replied">Replied</option>
+              <option value="won">Won / Closed</option>
+              <option value="ignored">Ignored</option>
             </select>
           </div>
 
@@ -272,8 +299,7 @@
         <div class="border-b border-slate-800 pb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="text-lg font-bold text-white">Agent Studio & 4-Key Gemini Failover Pool</h2>
-            <p class="text-xs text-slate-400 mt-1">Customize your Lead Hunter Agent instructions, auto-generate search
-              dorks, and manage your 4 Gemini API keys.</p>
+            <p class="text-xs text-slate-400 mt-1">Configure Lead Hunter Agent instructions, search freshness, and 4 Gemini API keys with auto-failover.</p>
           </div>
           <button type="button" onclick="compileAgentQueries()" id="compileBtn"
             class="px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition">
@@ -286,30 +312,37 @@
           <div>
             <label class="block text-xs font-semibold text-indigo-300 mb-1.5">Lead Hunter Agent System Prompt (What to
               Find & What to Reject)</label>
-            <textarea id="adminAgentPrompt" rows="5"
+            <textarea id="adminAgentPrompt" rows="6"
               class="w-full p-3 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Target Subreddits
-                (Comma-separated)</label>
-              <input id="adminSubreddits" type="text" placeholder="forhire,freelance_forhire,DesignJobs,arduino"
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Target Subreddits</label>
+              <input id="adminSubreddits" type="text" placeholder="forhire,startups,shopify,ecommerce"
                 class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Reddit Title Trigger Keywords</label>
-              <input id="adminRedditKeywords" type="text" placeholder="[hiring],looking to hire,need a,budget"
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Reddit Title Keywords</label>
+              <input id="adminRedditKeywords" type="text" placeholder="[hiring],looking to hire,need a developer"
                 class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Minimum Score to Save (Auto-Discard
-                Below)</label>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Minimum Score (Auto-Discard)</label>
               <select id="adminMinScore"
                 class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white">
                 <option value="7">7/10 — Qualified Clients Only (Recommended)</option>
                 <option value="8">8/10 — Strict High-Budget Clients Only</option>
                 <option value="5">5/10 — Broad Capture</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Default Post Freshness</label>
+              <select id="adminFreshness"
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white">
+                <option value="qdr:d">Last 24 Hours (qdr:d — Live Hunting)</option>
+                <option value="qdr:w">Last 7 Days (qdr:w)</option>
+                <option value="qdr:m">Last 30 Days (qdr:m)</option>
               </select>
             </div>
           </div>
@@ -318,7 +351,7 @@
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Serper Social Search Dork (Used across X,
               LinkedIn, Threads, Facebook, Telegram, Discord)</label>
             <input id="xQuery" type="text"
-              placeholder='("looking to hire" OR "need a developer") ("budget" OR "$") -"for hire"'
+              placeholder='("looking to hire" OR "need a developer") ("budget" OR "$") -intitle:"for hire"'
               class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
           </div>
         </div>
@@ -503,6 +536,7 @@
     async function loadLeads() {
       const status = document.getElementById('filterStatus').value;
       const region = document.getElementById('filterRegion').value;
+      const service = document.getElementById('filterService').value;
       const minScore = document.getElementById('filterScore').value;
       const hasBudget = document.getElementById('filterBudget').checked;
 
@@ -510,6 +544,7 @@
         status,
         platform: currentPlatform,
         min_score: minScore,
+        service_category: service,
         region,
         has_budget: hasBudget
       });
@@ -527,24 +562,37 @@
       const container = document.getElementById('leadsContainer');
       const leads = data.leads || [];
       if (!leads.length) {
-        container.innerHTML = '<div class="col-span-full glass rounded-2xl p-10 text-center text-sm text-slate-400">No leads match the active filters. Edit your Agent Prompt above and click <strong>Run Agent Scan</strong>.</div>';
+        container.innerHTML = '<div class="col-span-full glass rounded-2xl p-10 text-center text-sm text-slate-400">No leads match the active filters. Adjust your filters or click <strong>Run Agent Scan</strong> to discover fresh client leads.</div>';
         return;
       }
 
+      const serviceColors = {
+        'Web/App Dev': 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+        'E-Commerce': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+        'ERP/Portal': 'bg-purple-500/20 text-purple-300 border-purple-500/40',
+        'UI/UX & Branding': 'bg-pink-500/20 text-pink-300 border-pink-500/40',
+        'Video/Reels': 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+        'SMM/SEO': 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      };
+
       container.innerHTML = leads.map(lead => {
+        const catBadge = serviceColors[lead.service_category] || 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
         const scoreColor = lead.score >= 8
           ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
           : lead.score >= 6
             ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
             : 'bg-slate-700/40 text-slate-300 border-slate-600/40';
         const postUrl = lead.post_url || lead.url || '#';
+        const painPoint = lead.pain_point_summary || lead.summary || lead.title || '';
 
         return `
-          <article id="lead-card-${lead.id}" class="glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+          <article id="lead-card-${lead.id}" class="glass rounded-2xl p-5 flex flex-col justify-between gap-4 border border-slate-800/80 hover:border-indigo-500/30 transition">
             <div class="space-y-3">
               <div class="flex items-start justify-between gap-3">
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
                   <span class="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${escapeHtml(lead.platform)}</span>
+                  <span class="px-2.5 py-0.5 rounded-md text-[11px] font-semibold border ${catBadge}">${escapeHtml(lead.service_category || 'Web/App Dev')}</span>
+                  <span class="px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700/70">📍 ${escapeHtml(lead.client_region || 'Global')}</span>
                   <span class="px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${scoreColor}">Score ${lead.score}/10</span>
                   <span class="text-[11px] text-slate-400">by ${escapeHtml(lead.author)}</span>
                 </div>
@@ -556,17 +604,33 @@
 
               <div>
                 <h3 class="text-sm font-bold text-white leading-snug">${escapeHtml(lead.title)}</h3>
-                <p class="text-xs text-emerald-300/90 mt-1">${escapeHtml(lead.summary)}</p>
               </div>
 
-              <p class="text-xs text-slate-400 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 max-h-24 overflow-y-auto whitespace-pre-line">${escapeHtml(lead.raw_text)}</p>
+              <!-- CLIENT PAIN POINT CALLOUT -->
+              <div class="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/25 space-y-1">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  Client Pain Point & Hiring Need
+                </div>
+                <p class="text-xs text-slate-200 leading-relaxed">${escapeHtml(painPoint)}</p>
+              </div>
 
+              <!-- SOURCE POST EXCERPT -->
+              <div class="space-y-1">
+                <span class="text-[10px] uppercase font-bold text-slate-400">Source Post Excerpt</span>
+                <p class="text-xs text-slate-400 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 max-h-24 overflow-y-auto whitespace-pre-line">${escapeHtml(lead.raw_text)}</p>
+              </div>
+
+              <!-- TAILORED OUTREACH PITCH -->
               <div class="space-y-1.5">
                 <div class="flex items-center justify-between">
-                  <label class="text-[11px] font-semibold text-slate-300">AI Client Pitch (Gemini)</label>
+                  <label class="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                    <span class="text-indigo-400 font-bold">✦</span>
+                    Tailored CodeXplus Outreach Pitch
+                  </label>
                   <button onclick="regenerateReply(${lead.id}, this)"
                     class="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-semibold transition">
-                    ↻ Regenerate Reply
+                    ↻ Regenerate Pitch
                   </button>
                 </div>
                 <textarea id="reply-${lead.id}" rows="3"
@@ -576,7 +640,7 @@
 
             <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
               <div class="flex items-center gap-1.5">
-                <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white">Copy Pitch</button>
+                <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-md shadow-indigo-600/20">Copy Pitch</button>
                 <button onclick="markStatus(${lead.id}, 'replied')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">Mark Replied</button>
                 <button onclick="markStatus(${lead.id}, 'ignored')" class="px-2.5 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-400 text-xs">Ignore</button>
               </div>
@@ -593,7 +657,7 @@
     async function copyReply(id) {
       const txt = document.getElementById(`reply-${id}`).value;
       await navigator.clipboard.writeText(txt);
-      showBanner('Outreach message copied to clipboard.', 'success');
+      showBanner('Outreach pitch copied to clipboard.', 'success');
     }
 
     async function markStatus(id, status) {
@@ -620,7 +684,7 @@
           showBanner(data.detail || 'Failed to regenerate reply.', 'error');
         } else {
           document.getElementById(`reply-${id}`).value = data.suggested_reply;
-          showBanner('Generated fresh Gemini outreach reply.', 'success');
+          showBanner('Generated fresh Gemini outreach pitch.', 'success');
         }
       } finally {
         btn.textContent = orig;
@@ -733,6 +797,7 @@
       const spin = document.getElementById('syncSpinner');
       const txt = document.getElementById('syncBtnText');
       const agentPrompt = document.getElementById('quickAgentPrompt').value.trim();
+      const freshness = document.getElementById('quickFreshness').value;
       document.getElementById('adminAgentPrompt').value = agentPrompt;
 
       btn.disabled = true;
@@ -742,7 +807,7 @@
         const res = await fetch('/api/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_prompt: agentPrompt })
+          body: JSON.stringify({ agent_prompt: agentPrompt, freshness: freshness })
         });
         const data = await res.json();
         showBanner(data.notes || 'Agent scan running in background! Auto-refreshing in 20s...', 'success');
@@ -772,6 +837,8 @@
       document.getElementById('adminSubreddits').value = settings.agent_subreddits || '';
       document.getElementById('adminRedditKeywords').value = settings.agent_reddit_keywords || '';
       document.getElementById('adminMinScore').value = String(settings.agent_min_score || 7);
+      document.getElementById('adminFreshness').value = settings.search_freshness || 'qdr:d';
+      document.getElementById('quickFreshness').value = settings.search_freshness || 'qdr:d';
       document.getElementById('adminUsername').value = settings.admin_username || 'admin';
     }
 
@@ -793,6 +860,9 @@
     async function saveAdminSettings(silent = false) {
       const promptVal = document.getElementById('adminAgentPrompt').value.trim();
       document.getElementById('quickAgentPrompt').value = promptVal;
+      const freshnessVal = document.getElementById('adminFreshness').value;
+      document.getElementById('quickFreshness').value = freshnessVal;
+
       const payload = {
         gemini_api_key_1: document.getElementById('geminiKey1').value.trim(),
         gemini_api_key_2: document.getElementById('geminiKey2').value.trim(),
@@ -803,6 +873,7 @@
         agent_subreddits: document.getElementById('adminSubreddits').value.trim(),
         agent_reddit_keywords: document.getElementById('adminRedditKeywords').value.trim(),
         agent_min_score: parseInt(document.getElementById('adminMinScore').value, 10),
+        search_freshness: freshnessVal,
         x_query: document.getElementById('xQuery').value.trim(),
         admin_username: document.getElementById('adminUsername').value.trim(),
         admin_password: document.getElementById('adminPassword').value || null
@@ -814,7 +885,7 @@
       });
       if (res.ok && !silent) {
         document.getElementById('adminPassword').value = '';
-        showBanner('Agent prompt, search rules, and API keys saved.', 'success');
+        showBanner('Agent prompt, search rules, freshness, and API keys saved.', 'success');
       } else if (!res.ok) {
         showBanner('Failed to save settings.', 'error');
       }
