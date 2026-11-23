@@ -96,6 +96,7 @@ class SettingsUpdate(BaseModel):
     agent_subreddits: Optional[str] = None
     agent_reddit_keywords: Optional[str] = None
     agent_min_score: Optional[int] = None
+    search_freshness: Optional[str] = None
     x_query: Optional[str] = None
     admin_username: Optional[str] = None
     admin_password: Optional[str] = None
@@ -111,6 +112,7 @@ class AgentCompilePayload(BaseModel):
 
 class AgentScanPayload(BaseModel):
     agent_prompt: Optional[str] = None
+    freshness: Optional[str] = "qdr:d"
 
 
 def serialize_lead(row) -> dict:
@@ -119,6 +121,9 @@ def serialize_lead(row) -> dict:
     item["url"] = post_link
     item["post_url"] = post_link
     item["link"] = post_link
+    item["service_category"] = item.get("service_category") or "Web/App Dev"
+    item["client_region"] = item.get("client_region") or "Global"
+    item["pain_point_summary"] = item.get("pain_point_summary") or item.get("summary") or ""
     return item
 
 
@@ -171,6 +176,7 @@ def list_leads(
     status: Optional[str] = Query(None),
     platform: Optional[str] = Query(None),
     min_score: int = Query(0),
+    service_category: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
     has_budget: bool = Query(False),
     _user: str = Depends(require_auth),
@@ -189,13 +195,26 @@ def list_leads(
         query += " AND LOWER(platform) = LOWER(?)"
         params.append(platform)
 
-    if has_budget:
-        query += " AND (raw_text LIKE '%$\%' OR summary LIKE '\%$%' OR LOWER(raw_text) LIKE '%budget%' OR LOWER(summary) LIKE '%budget%')"
+    if service_category and service_category != "all":
+        query += " AND LOWER(service_category) = LOWER(?)"
+        params.append(service_category)
 
-    if region == "usa":
-        query += " AND (LOWER(raw_text) LIKE '%usa%' OR LOWER(raw_text) LIKE '%u.s.%' OR LOWER(raw_text) LIKE '%united states%' OR LOWER(raw_text) LIKE '%est%' OR LOWER(raw_text) LIKE '%pst%' OR LOWER(raw_text) LIKE '%cst%' OR LOWER(raw_text) LIKE '%usd%' OR raw_text LIKE '%\$%')"
-    elif region == "europe":
-        query += " AND (LOWER(raw_text) LIKE '%uk%' OR LOWER(raw_text) LIKE '%united kingdom%' OR LOWER(raw_text) LIKE '%europe%' OR LOWER(raw_text) LIKE '%eu%' OR LOWER(raw_text) LIKE '%gbp%' OR LOWER(raw_text) LIKE '%eur%' OR raw_text LIKE '%£%' OR raw_text LIKE '%€%')"
+    if has_budget:
+        query += " AND (raw_text LIKE '%$%' OR summary LIKE '%$%' OR LOWER(raw_text) LIKE '%budget%' OR LOWER(summary) LIKE '%budget%')"
+
+    if region and region != "all":
+        r_low = region.lower()
+        if r_low == "usa":
+            query += " AND (LOWER(client_region) = 'usa' OR LOWER(raw_text) LIKE '%usa%' OR LOWER(raw_text) LIKE '%u.s.%' OR LOWER(raw_text) LIKE '%united states%' OR LOWER(raw_text) LIKE '%est%' OR LOWER(raw_text) LIKE '%pst%' OR LOWER(raw_text) LIKE '%cst%' OR LOWER(raw_text) LIKE '%usd%' OR raw_text LIKE '%$%')"
+        elif r_low in ("europe", "uk"):
+            query += " AND (LOWER(client_region) LIKE '%uk%' OR LOWER(client_region) LIKE '%europe%' OR LOWER(raw_text) LIKE '%uk%' OR LOWER(raw_text) LIKE '%united kingdom%' OR LOWER(raw_text) LIKE '%europe%' OR LOWER(raw_text) LIKE '%eu%' OR LOWER(raw_text) LIKE '%gbp%' OR LOWER(raw_text) LIKE '%eur%' OR raw_text LIKE '%£%' OR raw_text LIKE '%€%')"
+        elif r_low in ("gulf", "uae"):
+            query += " AND (LOWER(client_region) LIKE '%gulf%' OR LOWER(client_region) LIKE '%uae%' OR LOWER(raw_text) LIKE '%uae%' OR LOWER(raw_text) LIKE '%dubai%' OR LOWER(raw_text) LIKE '%saudi%' OR LOWER(raw_text) LIKE '%qatar%' OR LOWER(raw_text) LIKE '%aed%' OR LOWER(raw_text) LIKE '%sar%')"
+        elif r_low == "pakistan":
+            query += " AND (LOWER(client_region) = 'pakistan' OR LOWER(raw_text) LIKE '%pakistan%' OR LOWER(raw_text) LIKE '%pkr%' OR LOWER(raw_text) LIKE '%karachi%' OR LOWER(raw_text) LIKE '%lahore%' OR LOWER(raw_text) LIKE '%islamabad%')"
+        else:
+            query += " AND LOWER(client_region) = LOWER(?)"
+            params.append(region)
 
     query += " ORDER BY created_at DESC LIMIT 250"
     cur.execute(query, params)
@@ -315,14 +334,19 @@ def trigger_sync(
     _user: str = Depends(require_auth),
 ):
     prompt_to_use = payload.agent_prompt if payload and payload.agent_prompt else None
+    freshness_to_use = payload.freshness if payload and payload.freshness else get_setting("search_freshness", "qdr:d")
+
     if prompt_to_use and prompt_to_use.strip():
         set_setting("agent_prompt", prompt_to_use.strip())
-    background_tasks.add_task(run_sync, prompt_to_use)
+    if freshness_to_use:
+        set_setting("search_freshness", freshness_to_use.strip())
+
+    background_tasks.add_task(run_sync, prompt_to_use, freshness_to_use)
     return {
         "fetched": 0,
         "saved": 0,
         "qualified": 0,
-        "notes": "Agent scan started in background! Wait 20-30 seconds and refresh to see filtered leads.",
+        "notes": f"Agent scan started in background with freshness: {freshness_to_use}! Wait 20-30 seconds and refresh.",
         "errors": [],
     }
 
@@ -345,9 +369,16 @@ def get_admin_settings(_user: str = Depends(require_auth)):
         "gemini_api_key_3": get_setting("gemini_api_key_3", ""),
         "gemini_api_key_4": get_setting("gemini_api_key_4", ""),
         "agent_prompt": get_setting("agent_prompt", DEFAULT_AGENT_PROMPT),
-        "agent_subreddits": get_setting("agent_subreddits", "forhire,freelance_forhire,DesignJobs,slavelabour,hiring,arduino"),
-        "agent_reddit_keywords": get_setting("agent_reddit_keywords", "[hiring],looking to hire,need a,looking for a"),
+        "agent_subreddits": get_setting(
+            "agent_subreddits",
+            "forhire,freelance_forhire,DesignJobs,startups,SaaS,shopify,ecommerce,smallbusiness,Entrepreneur",
+        ),
+        "agent_reddit_keywords": get_setting(
+            "agent_reddit_keywords",
+            "[hiring],looking to hire,need a developer,need an agency,recommend a dev,store redesign,need custom erp,hiring a video editor",
+        ),
         "agent_min_score": int(get_setting("agent_min_score", "7")),
+        "search_freshness": get_setting("search_freshness", "qdr:d"),
         "x_query": get_setting("x_query", ""),
         "admin_username": get_setting("admin_username", os.environ.get("ADMIN_USERNAME", "admin")),
     }
@@ -368,6 +399,7 @@ def save_admin_settings(payload: SettingsUpdate, _user: str = Depends(require_au
         "agent_subreddits": payload.agent_subreddits,
         "agent_reddit_keywords": payload.agent_reddit_keywords,
         "agent_min_score": str(payload.agent_min_score) if payload.agent_min_score is not None else None,
+        "search_freshness": payload.search_freshness,
         "x_query": payload.x_query,
         "admin_username": payload.admin_username.strip() if payload.admin_username else None,
         "admin_password": payload.admin_password if payload.admin_password else None,
