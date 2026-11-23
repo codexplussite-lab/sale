@@ -4,11 +4,14 @@ import json
 import time
 import sqlite3
 import hashlib
+import threading
 from datetime import datetime, timezone
 import httpx
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/leads.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+_SYNC_LOCK = threading.Lock()
 
 DEFAULT_AGENT_PROMPT = """Hunt for REAL CLIENTS, startup founders, and business owners actively looking to hire or place a paid order for:
 - Web & Mobile Application Development (Next.js, React, Node.js, Python, Full-Stack SaaS, Shopify/WordPress)
@@ -23,9 +26,12 @@ STRICT EXCLUSIONS (SCORE 1-2 AND REJECT):
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL;")
+    cur.execute("PRAGMA synchronous=NORMAL;")
+    cur.execute("PRAGMA busy_timeout=30000;")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS leads (
@@ -267,7 +273,8 @@ def fetch_arctic_shift_reddit() -> list[dict]:
 
 
 def fetch_serper_channels(serper_key: str) -> list[dict]:
-    if not serper_key:
+    clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
+    if not clean_key:
         return []
     base_dork = get_setting(
         "x_query",
@@ -288,7 +295,7 @@ def fetch_serper_channels(serper_key: str) -> list[dict]:
             try:
                 resp = client.post(
                     "https://google.serper.dev/search",
-                    headers={"X-API-KEY": serper_key, "Content-Type": "application/json"},
+                    headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
                     json={"q": q, "num": 5, "tbs": "qdr:d"},
                 )
                 if resp.status_code != 200:
@@ -314,68 +321,82 @@ def fetch_serper_channels(serper_key: str) -> list[dict]:
 
 
 def run_sync(custom_prompt: str | None = None) -> dict:
-    serper_key = get_setting("serper_api_key")
-    key_pool = get_gemini_key_pool()
-    agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
+    if not _SYNC_LOCK.acquire(blocking=False):
+        return {
+            "fetched": 0,
+            "saved": 0,
+            "rejected": 0,
+            "notes": "A background scan is already running. Wait a few seconds and refresh.",
+        }
     try:
-        min_keep_score = int(get_setting("agent_min_score", "7"))
-    except ValueError:
-        min_keep_score = 7
+        serper_key = get_setting("serper_api_key")
+        key_pool = get_gemini_key_pool()
+        agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
+        try:
+            min_keep_score = int(get_setting("agent_min_score", "7"))
+        except ValueError:
+            min_keep_score = 7
 
-    candidates = fetch_arctic_shift_reddit() + fetch_serper_channels(serper_key)
-    conn = get_db()
-    cur = conn.cursor()
+        candidates = fetch_arctic_shift_reddit() + fetch_serper_channels(serper_key)
+        saved = 0
+        rejected = 0
+        notes = []
 
-    saved = 0
-    rejected = 0
-    notes = []
+        for item in candidates:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM leads WHERE external_id = ?", (item["external_id"],))
+            exists = cur.fetchone() is not None
+            conn.close()
+            if exists:
+                continue
 
-    for item in candidates:
-        cur.execute("SELECT id FROM leads WHERE external_id = ?", (item["external_id"],))
-        if cur.fetchone():
-            continue
+            score = 5
+            summary = item["title"]
+            reply = ""
 
-        score = 5
-        summary = item["title"]
-        reply = ""
+            if key_pool:
+                try:
+                    score, summary, reply = score_and_draft(item, agent_prompt)
+                    time.sleep(0.35)
+                    if score < min_keep_score:
+                        rejected += 1
+                        continue
+                except Exception as exc:
+                    notes.append(f"Gemini ({item['external_id']}): {exc}")
+            else:
+                notes.append("No Gemini API keys configured.")
 
-        if key_pool:
-            try:
-                score, summary, reply = score_and_draft(item, agent_prompt)
-                time.sleep(0.35)
-                if score < min_keep_score:
-                    rejected += 1
-                    continue
-            except Exception as exc:
-                notes.append(f"Gemini ({item['external_id']}): {exc}")
-        else:
-            notes.append("No Gemini API keys configured.")
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO leads (external_id, platform, author, title, raw_text, url, score, summary, suggested_reply, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+                """,
+                (
+                    item["external_id"],
+                    item["platform"],
+                    item["author"],
+                    item["title"],
+                    item["raw_text"],
+                    item["url"],
+                    score,
+                    summary,
+                    reply,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            if cur.rowcount > 0:
+                saved += 1
+            conn.commit()
+            conn.close()
 
-        cur.execute(
-            """
-            INSERT INTO leads (external_id, platform, author, title, raw_text, url, score, summary, suggested_reply, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
-            """,
-            (
-                item["external_id"],
-                item["platform"],
-                item["author"],
-                item["title"],
-                item["raw_text"],
-                item["url"],
-                score,
-                summary,
-                reply,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        saved += 1
-
-    conn.commit()
-    conn.close()
-    return {
-        "fetched": len(candidates),
-        "saved": saved,
-        "rejected": rejected,
-        "notes": "; ".join(notes[:3]),
-    }
+        return {
+            "fetched": len(candidates),
+            "saved": saved,
+            "rejected": rejected,
+            "notes": "; ".join(notes[:3]),
+        }
+    finally:
+        _SYNC_LOCK.release()
