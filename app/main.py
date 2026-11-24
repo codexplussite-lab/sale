@@ -4,6 +4,7 @@ import time
 import base64
 import hashlib
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query, Request, Depends, BackgroundTasks
 from fastapi.responses import FileResponse, Response, JSONResponse
@@ -21,11 +22,9 @@ from app.worker import (
     DEFAULT_AGENT_PROMPT,
 )
 
-app = FastAPI(title="CodeXplus Lead Engine")
 
-
-@app.on_event("startup")
-async def start_auto_hunter_loop():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     async def _loop():
         while True:
             await asyncio.sleep(300)  # Auto-scan every 5 minutes for first-mover leads
@@ -34,8 +33,12 @@ async def start_auto_hunter_loop():
             except Exception as exc:
                 print(f"[AutoHunter] Background scan error: {exc}")
 
-    asyncio.create_task(_loop())
+    task = asyncio.create_task(_loop())
+    yield
+    task.cancel()
 
+
+app = FastAPI(title="CodeXplus Lead Engine", lifespan=lifespan)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -285,7 +288,6 @@ def update_lead(lead_id: int, payload: LeadUpdate, _user: str = Depends(require_
         conn.close()
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    conn.commit()
     cur.execute("SELECT * FROM leads WHERE id = ?", (lead_id,))
     updated = serialize_lead(cur.fetchone())
     conn.close()
@@ -300,7 +302,6 @@ def delete_lead(lead_id: int, _user: str = Depends(require_auth)):
     if cur.rowcount == 0:
         conn.close()
         raise HTTPException(status_code=404, detail="Lead not found")
-    conn.commit()
     conn.close()
     return {"deleted": True, "id": lead_id}
 
@@ -314,7 +315,6 @@ def bulk_delete_leads(status: Optional[str] = Query(None), _user: str = Depends(
     else:
         cur.execute("DELETE FROM leads")
     deleted_count = cur.rowcount
-    conn.commit()
     conn.close()
     return {"deleted_count": deleted_count}
 
@@ -337,7 +337,6 @@ def regenerate_reply(lead_id: int, _user: str = Depends(require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
     cur.execute("UPDATE leads SET suggested_reply = ? WHERE id = ?", (new_reply, lead_id))
-    conn.commit()
     conn.close()
     return {"id": lead_id, "suggested_reply": new_reply}
 
@@ -425,7 +424,6 @@ def save_admin_settings(payload: SettingsUpdate, _user: str = Depends(require_au
                 "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (k, v),
             )
-    conn.commit()
     conn.close()
     return {"saved": True}
 
