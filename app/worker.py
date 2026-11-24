@@ -30,7 +30,6 @@ STRICT SELLER / CHATTER EXCLUSIONS (SCORE 1 AND SET is_buyer=false):
 - Freelancers/agencies advertising their own services ("[For Hire]", "DM me for services", "check out my portfolio", "I am a developer looking for clients").
 - Tech discussions, book/course requests, memes, or unpaid/equity-only posts."""
 
-# Only block phrases that unmistakably mean the author is a freelancer pitching themselves
 SELLER_BODY_PHRASES = [
     "[for hire]",
     "for hire",
@@ -50,9 +49,11 @@ SELLER_BODY_PHRASES = [
     "i will build your",
     "we build",
     "how they find clients",
+    "[removed]",
+    "[deleted]",
+    "removed by moderator",
 ]
 
-# Block if the author's display name/header itself declares them a seller/dev
 SELLER_AUTHOR_TITLES = [
     "website & app developer",
     "web & app developer",
@@ -298,6 +299,43 @@ Keep it direct, friendly, under 80 words, focused on solving their exact project
     return call_gemini(prompt)
 
 
+def verify_reddit_post_live(client: httpx.Client, permalink: str) -> tuple[bool, int, str]:
+    """
+    Checks Reddit's live JSON endpoint so posts removed by moderators/AutoMod
+    or having ANY comments (> 0) are skipped immediately.
+    """
+    clean_perm = permalink.rstrip("/")
+    live_url = f"https://www.reddit.com{clean_perm}.json"
+    try:
+        resp = client.get(
+            live_url,
+            headers={"User-Agent": "CodeXplusLeadHunter/2.0 (by /u/codexplus_bot)"},
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return False, 0, ""
+        payload = resp.json()
+        post_data = payload[0]["data"]["children"][0]["data"]
+
+        # Reject if deleted by user or removed by moderator / AutoMod / spam filter
+        if post_data.get("removed_by_category") is not None:
+            return False, 0, ""
+        author = str(post_data.get("author", ""))
+        selftext = str(post_data.get("selftext", "")).strip()
+        title = str(post_data.get("title", "")).strip()
+        if author in ("", "[deleted]") or selftext in ("[removed]", "[deleted]") or "[removed" in title.lower():
+            return False, 0, ""
+
+        # Strict 0-comment first-mover enforcement
+        live_comments = int(post_data.get("num_comments", 0))
+        if live_comments > 0:
+            return False, live_comments, ""
+
+        return True, 0, selftext
+    except Exception:
+        return False, 0, ""
+
+
 def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str]) -> list[dict]:
     found = []
     try:
@@ -312,26 +350,37 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 title = post.get("title", "")
                 body = post.get("selftext", "")
                 num_comments = int(post.get("num_comments", 0))
-                if num_comments > 2:
+                if num_comments > 0:
                     continue
                 if is_seller_or_chatter(title, body):
                     continue
                 lower_title = title.lower()
                 if keywords and not any(kw in lower_title for kw in keywords):
                     continue
-                created_utc = int(post.get("created_utc", now_ts))
-                mins_ago = max(1, (now_ts - created_utc) // 60)
+
                 post_id = post.get("id", "")
                 permalink = post.get("permalink", f"/r/{sub}/comments/{post_id}")
+
+                # Verify live on Reddit: must not be removed and must still have 0 comments
+                is_live, _, live_body = verify_reddit_post_live(client, permalink)
+                if not is_live:
+                    continue
+
+                final_body = live_body if live_body else body
+                if is_seller_or_chatter(title, final_body):
+                    continue
+
+                created_utc = int(post.get("created_utc", now_ts))
+                mins_ago = max(1, (now_ts - created_utc) // 60)
                 found.append(
                     {
                         "external_id": f"reddit_{post_id}",
                         "platform": "Reddit",
                         "author": post.get("author", "unknown"),
                         "title": title,
-                        "raw_text": f"{title}\n{body}"[:1200],
+                        "raw_text": f"{title}\n{final_body}"[:1200],
                         "url": f"https://www.reddit.com{permalink}",
-                        "freshness_badge": f"Posted {mins_ago}m ago · {num_comments} replies",
+                        "freshness_badge": f"Posted {mins_ago}m ago · 0 replies",
                     }
                 )
     except Exception:
