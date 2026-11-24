@@ -14,18 +14,19 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 _SYNC_LOCK = threading.Lock()
 
-DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL BUYERS, startup founders, and business owners who have a specific project they want built and are paying someone else to make it (e.g., "I want to build an app/website/software, budget $500, tell me who can make it").
+DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who are explicitly hiring or requesting quotes to build a project in one of CodeXplus's services:
+1. Web or Mobile App Development (React, Next.js, iOS, Android, SaaS, Shopify/WordPress)
+2. Custom Software, ERP, CRM, AI Automation, or API Integration
+3. Graphic Design, UI/UX, or Branding
+4. SEO, GEO, or Social Media Marketing
+5. Custom Arduino / Embedded Hardware Prototyping
 
-REQUIRED BUYER SIGNALS (MUST HAVE AT LEAST ONE):
-- The author describes a specific product, app, website, store, custom software, design, SEO, or Arduino project THEY need built.
-- The author is asking for quotes, proposals, recommendations, or developers/agencies to hire for their project.
+STRICT REJECTION RULES (MUST SCORE 1 AND SET is_buyer=false):
+- Author's display name or bio says they are a developer, designer, freelancer, agency, or engineer (e.g. "website & app developer").
+- Rhetorical questions, tech discussions, rants, memes, or book/course requests (e.g. "Can someone write a book...", "How do I find clients...").
+- Freelancers/agencies advertising their own services ("for hire", "DM me", "message me", "portfolio", "available for work").
+- Any post where the author is NOT clearly looking to hire/pay someone to build a project."""
 
-STRICT SELLER / DEVELOPER EXCLUSIONS (IMMEDIATELY SCORE 1 AND REJECT):
-- ANY developer, freelancer, designer, marketer, or agency advertising their own skills ("I am a developer", "iOS developer message me", "DM me", "available for work", "looking for work", "open to work", "here is my portfolio", "I can build", "we build").
-- Posts where the author is offering services rather than buying them.
-- Unpaid internships, equity-only cofounder searches, or job-seeker posts."""
-
-# Hard-block obvious freelancer/developer self-promotion phrases before calling Gemini
 SELLER_SPAM_PHRASES = [
     "[for hire]",
     "for hire",
@@ -39,18 +40,27 @@ SELLER_SPAM_PHRASES = [
     "my portfolio",
     "check out my portfolio",
     "hire me",
+    "website & app developer",
+    "web & app developer",
+    "full stack developer",
+    "fullstack developer",
+    "software developer",
+    "mobile app developer",
+    "ios developer",
+    "android developer",
+    "freelance developer",
+    "graphic designer",
+    "ui/ux designer",
     "i am a developer",
-    "i am a full stack",
-    "i am a web developer",
-    "i am an ios",
     "i am a designer",
     "i will build your",
     "we build",
-    "offering services",
+    "how they find clients",
+    "find clients",
 ]
 
 
-def is_seller_self_promo(text: str) -> bool:
+def is_seller_or_chatter(text: str) -> bool:
     low = (text or "").lower()
     return any(phrase in low for phrase in SELLER_SPAM_PHRASES)
 
@@ -191,7 +201,7 @@ def test_single_gemini_key(api_key: str) -> dict:
 
 def generate_queries_from_prompt(agent_prompt: str) -> dict:
     compiler_prompt = f"""You are a search query engineer for a B2B/freelance client lead scraper.
-Convert the user's Lead Hunter Agent Prompt into optimal search parameters that ONLY match buyers/clients with real projects (never developers/freelancers pitching themselves).
+Convert the user's Lead Hunter Agent Prompt into strict search parameters that ONLY match paying clients hiring someone to build software, apps, websites, design, marketing, or hardware.
 
 USER AGENT PROMPT:
 {agent_prompt}
@@ -200,7 +210,7 @@ Return ONLY valid JSON with these exact keys:
 {{
   "subreddits": "comma-separated relevant subreddits without r/, e.g. forhire,freelance_forhire,DesignJobs,startups,SaaS,shopify,smallbusiness",
   "reddit_keywords": "comma-separated lowercase trigger phrases to require in Reddit titles, e.g. [hiring],looking to hire,need a developer,want to build,budget",
-  "serper_dork": "Google search boolean query without site: prefix that matches buyers asking someone to build a project and excludes freelancers, e.g. (\\"looking to hire\\" OR \\"want to build\\" OR \\"need someone to build\\" OR \\"need a website\\" OR \\"need an app\\") (\\"budget\\" OR \\"$\\") -\\"for hire\\" -\\"message me\\" -\\"dm me\\" -\\"portfolio\\""
+  "serper_dork": "Google search boolean query without site: prefix that matches clients hiring for a project build and excludes developers/chatter, e.g. (\\"[hiring]\\" OR \\"looking to hire a developer\\" OR \\"looking to hire an agency\\" OR \\"need someone to build\\" OR \\"need a web developer\\" OR \\"need an app developer\\") (\\"budget\\" OR \\"$\\") -\\"for hire\\" -\\"message me\\" -\\"dm me\\" -\\"portfolio\\""
 }}"""
     raw = call_gemini(compiler_prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
@@ -208,13 +218,13 @@ Return ONLY valid JSON with these exact keys:
     return {
         "subreddits": str(parsed.get("subreddits", "forhire,freelance_forhire,DesignJobs,startups,SaaS,shopify,ecommerce,smallbusiness,Entrepreneur")),
         "reddit_keywords": str(parsed.get("reddit_keywords", "[hiring],looking to hire,need a developer,want to build,need someone to build,need an agency,store redesign")),
-        "serper_dork": str(parsed.get("serper_dork", '("looking to hire" OR "want to build" OR "need someone to build" OR "need a website" OR "need an app") ("budget" OR "$") -"for hire" -"message me" -"dm me" -"portfolio"')),
+        "serper_dork": str(parsed.get("serper_dork", '("[hiring]" OR "looking to hire a developer" OR "looking to hire an agency" OR "need someone to build" OR "need a web developer" OR "need an app developer") ("budget" OR "$") -"for hire" -"message me" -"dm me" -"portfolio"')),
     }
 
 
 def score_and_draft(lead: dict, agent_prompt: str) -> tuple[int, str, str, str, str]:
     prompt = f"""You are a strict Buyer-vs-Seller Lead Auditor for CodeXplus (https://codexplus.site).
-Your #1 job is to protect the user from wasting time on posts written by OTHER developers, freelancers, or agencies.
+Your ONLY job is to pass posts where a REAL PAYING CLIENT is actively hiring or asking for quotes to build a software, web, app, design, marketing, or hardware project.
 
 FOLLOW THIS ACTIVE AGENT MISSION & FILTERING RUBRIC STRICTLY:
 {agent_prompt}
@@ -222,18 +232,18 @@ FOLLOW THIS ACTIVE AGENT MISSION & FILTERING RUBRIC STRICTLY:
 CANDIDATE POST TO AUDIT:
 Platform: {lead['platform']}
 Competition Status: {lead.get('freshness_badge', 'Fresh post')}
-Title: {lead['title']}
-Text: {lead['raw_text']}
+Title / Author Line: {lead['title']}
+Post Body: {lead['raw_text']}
 
-CRITICAL AUTHOR AUDIT (DO THIS FIRST):
-1. Ask yourself: Is the author of this post a DEVELOPER/FREELANCER/AGENCY offering their services (e.g., "iOS developer message me", "I am looking for clients/work", "DM me for web dev", "here is my portfolio")?
-   -> If YES, set "is_buyer": false and "score": 1 immediately!
-2. Ask yourself: Does the post describe a SPECIFIC project/product/problem the author wants built for their own business or idea (e.g., "I want to build a booking app, budget $500, looking for a developer")?
-   -> If NO (or if it is vague self-promotion), set "is_buyer": false and "score": 1!
-3. Only if "is_buyer" is true AND it matches the Agent Mission:
-   - Give score 7-8 if they clearly state what project they want built.
-   - Give score 9-10 if they also state a budget ($500, $1k, etc.) or urgent timeline.
-   - Write a short, sharp, human reply from CodeXplus (https://codexplus.site) directly addressing their exact project and budget.
+MANDATORY 3-GATE REJECTION CHECK (IF ANY FAIL -> SET is_buyer=false AND score=1):
+Gate 1 — Author Check: Does the author's name, bio, or text indicate they are a developer, designer, freelancer, or agency (e.g., "Ray website & app developer", "iOS developer message me", "looking for clients")? If YES -> FAIL (score 1).
+Gate 2 — Commercial Hiring Intent Check: Is the author asking to HIRE/PAY someone to build a specific project (app, website, software, design, SEO, Arduino)? If it is a rhetorical question ("Can someone write a book..."), tech advice, meme, rant, or job-seeker post -> FAIL (score 1).
+Gate 3 — Scope Clarity Check: Does the post clearly state WHAT needs to be built or solved? If vague chatter -> FAIL (score 1).
+
+ONLY if ALL 3 GATES PASS:
+- Score 7-8 if they clearly state the project they are hiring for.
+- Score 9-10 if they also state a budget ($500, $1,000, etc.) or urgent timeline.
+- Write a direct, concise outreach message from CodeXplus (https://codexplus.site) addressing their exact project and budget.
 
 Respond ONLY in valid JSON:
 {{
@@ -294,7 +304,7 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 num_comments = int(post.get("num_comments", 0))
                 if num_comments > 2:
                     continue
-                if is_seller_self_promo(full_text):
+                if is_seller_or_chatter(full_text):
                     continue
                 lower_title = title.lower()
                 if keywords and not any(kw in lower_title for kw in keywords):
@@ -361,7 +371,7 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
                 title = res.get("title", "")
                 snippet = res.get("snippet", "")
                 full_text = f"{title}\n{snippet}"
-                if is_seller_self_promo(full_text):
+                if is_seller_or_chatter(full_text):
                     continue
                 date_hint = res.get("date", "Past 1h")
                 ext_id = f"{platform.lower()}_{hashlib.md5(link.encode()).hexdigest()[:12]}"
@@ -382,13 +392,10 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
 
 
 def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
-    """Scrapes Reddit + X + LinkedIn + Threads + Facebook + Telegram + Discord + Twist simultaneously."""
     clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
     tbs_val = (freshness or "qdr:h").strip()
-    base_dork = get_setting(
-        "x_query",
-        '("looking to hire" OR "want to build" OR "need someone to build" OR "need a website" OR "need an app") ("budget" OR "$") -"for hire" -"message me" -"dm me" -"portfolio"',
-    )
+    strict_default_dork = '("[hiring]" OR "looking to hire a developer" OR "looking to hire an agency" OR "need someone to build" OR "need a web developer" OR "need an app developer") ("budget" OR "$") -"for hire" -"message me" -"dm me" -"portfolio"'
+    base_dork = get_setting("x_query", strict_default_dork)
 
     social_queries = [
         ("X", f"(site:x.com OR site:twitter.com) {base_dork}"),
@@ -430,6 +437,9 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
     try:
         serper_key = get_setting("serper_api_key")
         key_pool = get_gemini_key_pool()
+        if not key_pool:
+            return {"fetched": 0, "saved": 0, "rejected": 0, "notes": "No Gemini API keys configured."}
+
         agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
         active_freshness = (freshness or "").strip() or get_setting("search_freshness", "qdr:h")
         try:
@@ -451,23 +461,15 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             if exists:
                 continue
 
-            score = 5
-            summary = f"[{item.get('freshness_badge', 'Fresh')}] {item['title']}"
-            service_category = "Web/App Dev"
-            client_region = "Global"
-            reply = ""
-
-            if key_pool:
-                try:
-                    score, summary, service_category, client_region, reply = score_and_draft(item, agent_prompt)
-                    time.sleep(0.25)
-                    if score < min_keep_score:
-                        rejected += 1
-                        continue
-                except Exception as exc:
-                    notes.append(f"Gemini ({item['platform']}): {exc}")
-            else:
-                notes.append("No Gemini API keys configured.")
+            try:
+                score, summary, service_category, client_region, reply = score_and_draft(item, agent_prompt)
+                time.sleep(0.25)
+                if score < min_keep_score:
+                    rejected += 1
+                    continue
+            except Exception as exc:
+                notes.append(f"Gemini ({item['platform']}): {exc}")
+                continue
 
             conn = get_db()
             cur = conn.cursor()
