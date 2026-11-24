@@ -5,6 +5,7 @@ import time
 import sqlite3
 import hashlib
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import httpx
 
@@ -54,7 +55,6 @@ def get_db():
         )
         """
     )
-    # Ensure columns exist if upgrading an older leads.db
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(leads)").fetchall()}
     if "pain_point_summary" not in existing_cols:
         cur.execute("ALTER TABLE leads ADD COLUMN pain_point_summary TEXT DEFAULT ''")
@@ -238,13 +238,53 @@ Keep it direct, friendly, under 80 words, focused on solving their exact project
     return call_gemini(prompt)
 
 
+def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str]) -> list[dict]:
+    found = []
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.get(
+                "https://arctic-shift.photon-reddit.com/api/posts/search",
+                params={"subreddit": sub, "after": after_ts, "limit": 20, "sort": "desc"},
+            )
+            if resp.status_code != 200:
+                return []
+            for post in resp.json().get("data", []):
+                title = post.get("title", "")
+                body = post.get("selftext", "")
+                num_comments = int(post.get("num_comments", 0))
+                if num_comments > 2:
+                    continue
+                lower_title = title.lower()
+                if "[for hire]" in lower_title or "for hire" in lower_title:
+                    continue
+                if keywords and not any(kw in lower_title for kw in keywords):
+                    continue
+                created_utc = int(post.get("created_utc", now_ts))
+                mins_ago = max(1, (now_ts - created_utc) // 60)
+                post_id = post.get("id", "")
+                permalink = post.get("permalink", f"/r/{sub}/comments/{post_id}")
+                found.append(
+                    {
+                        "external_id": f"reddit_{post_id}",
+                        "platform": "Reddit",
+                        "author": post.get("author", "unknown"),
+                        "title": title,
+                        "raw_text": f"{title}\n{body}"[:1200],
+                        "url": f"https://www.reddit.com{permalink}",
+                        "freshness_badge": f"Posted {mins_ago}m ago · {num_comments} replies",
+                    }
+                )
+    except Exception:
+        pass
+    return found
+
+
 def fetch_arctic_shift_reddit() -> list[dict]:
-    """First-Come-First-Served Reddit filter: only posts from last 45 mins with <= 2 replies."""
     subs_raw = get_setting(
         "agent_subreddits",
         "forhire,freelance_forhire,DesignJobs,startups,SaaS,shopify,ecommerce,smallbusiness,Entrepreneur",
     )
-    subreddits = [s.strip().replace("r/", "") for s in subs_raw.split(",") if s.strip()]
+    subreddits = [s.strip().replace("r/", "") for s in subs_raw.split(",") if s.strip()][:9]
     if not subreddits:
         subreddits = ["forhire", "freelance_forhire", "DesignJobs", "hiring"]
 
@@ -254,104 +294,89 @@ def fetch_arctic_shift_reddit() -> list[dict]:
     )
     keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
 
-    items = []
     now_ts = int(time.time())
-    after_ts = now_ts - 2700  # Strict 45-minute window so you reply before competitors
+    after_ts = now_ts - 2700  # Strict 45-minute window
+    items = []
 
-    with httpx.Client(timeout=15.0) as client:
-        for sub in subreddits[:9]:
-            try:
-                resp = client.get(
-                    "https://arctic-shift.photon-reddit.com/api/posts/search",
-                    params={"subreddit": sub, "after": after_ts, "limit": 20, "sort": "desc"},
-                )
-                if resp.status_code != 200:
-                    continue
-                for post in resp.json().get("data", []):
-                    title = post.get("title", "")
-                    body = post.get("selftext", "")
-                    num_comments = int(post.get("num_comments", 0))
-                    # Skip crowded threads where multiple people already applied
-                    if num_comments > 2:
-                        continue
-                    lower_title = title.lower()
-                    if "[for hire]" in lower_title or "for hire" in lower_title:
-                        continue
-                    if keywords and not any(kw in lower_title for kw in keywords):
-                        continue
-                    created_utc = int(post.get("created_utc", now_ts))
-                    mins_ago = max(1, (now_ts - created_utc) // 60)
-                    post_id = post.get("id", "")
-                    permalink = post.get("permalink", f"/r/{sub}/comments/{post_id}")
-                    items.append(
-                        {
-                            "external_id": f"reddit_{post_id}",
-                            "platform": "Reddit",
-                            "author": post.get("author", "unknown"),
-                            "title": title,
-                            "raw_text": f"{title}\n{body}"[:1200],
-                            "url": f"https://www.reddit.com{permalink}",
-                            "freshness_badge": f"Posted {mins_ago}m ago · {num_comments} replies",
-                        }
-                    )
-            except Exception:
-                continue
+    with ThreadPoolExecutor(max_workers=len(subreddits)) as pool:
+        futures = [pool.submit(_fetch_single_subreddit, sub, after_ts, now_ts, keywords) for sub in subreddits]
+        for fut in as_completed(futures):
+            items.extend(fut.result())
     return items
 
 
-def fetch_serper_channels(serper_key: str, freshness: str = "qdr:h") -> list[dict]:
-    """Defaults to tbs='qdr:h' (past 1 hour) so social leads are caught before competitors apply."""
+def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs_val: str) -> list[dict]:
+    found = []
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            resp = client.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
+                json={"q": query, "num": 6, "tbs": tbs_val},
+            )
+            if resp.status_code != 200:
+                return []
+            for res in resp.json().get("organic", []):
+                link = res.get("link", "")
+                title = res.get("title", "")
+                snippet = res.get("snippet", "")
+                date_hint = res.get("date", "Past 1h")
+                ext_id = f"{platform.lower()}_{hashlib.md5(link.encode()).hexdigest()[:12]}"
+                found.append(
+                    {
+                        "external_id": ext_id,
+                        "platform": platform,
+                        "author": platform,
+                        "title": title,
+                        "raw_text": f"{title}\n{snippet}"[:1200],
+                        "url": link,
+                        "freshness_badge": f"Fresh ({date_hint})",
+                    }
+                )
+    except Exception:
+        pass
+    return found
+
+
+def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
+    """Scrapes Reddit + X + LinkedIn + Threads + Facebook + Telegram + Discord + Twist simultaneously."""
     clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
-    if not clean_key:
-        return []
     tbs_val = (freshness or "qdr:h").strip()
     base_dork = get_setting(
         "x_query",
         '("looking to hire" OR "need a developer" OR "need a website" OR "need an app" OR "graphic designer" OR "SEO") ("budget" OR "$") -"for hire"',
     )
-    queries = [
+
+    social_queries = [
         ("X", f"(site:x.com OR site:twitter.com) {base_dork}"),
+        ("LinkedIn", f'site:linkedin.com/posts {base_dork} -"open to work"'),
         ("Threads", f"site:threads.net {base_dork}"),
         ("Facebook", f"site:facebook.com {base_dork}"),
         ("Telegram", f"site:t.me {base_dork}"),
         ("Discord", f"(site:discord.com OR site:discord.gg) {base_dork}"),
         ("Twist", f"site:twist.com {base_dork}"),
-        ("LinkedIn", f'site:linkedin.com/posts {base_dork} -"open to work"'),
     ]
+
+    t_low = (target_platform or "all").strip().lower()
     items = []
-    with httpx.Client(timeout=15.0) as client:
-        for platform, q in queries:
-            try:
-                resp = client.post(
-                    "https://google.serper.dev/search",
-                    headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
-                    json={"q": q, "num": 5, "tbs": tbs_val},
-                )
-                if resp.status_code != 200:
-                    continue
-                for res in resp.json().get("organic", []):
-                    link = res.get("link", "")
-                    title = res.get("title", "")
-                    snippet = res.get("snippet", "")
-                    date_hint = res.get("date", "Past 1h")
-                    ext_id = f"{platform.lower()}_{hashlib.md5(link.encode()).hexdigest()[:12]}"
-                    items.append(
-                        {
-                            "external_id": ext_id,
-                            "platform": platform,
-                            "author": platform,
-                            "title": title,
-                            "raw_text": f"{title}\n{snippet}"[:1200],
-                            "url": link,
-                            "freshness_badge": f"Fresh ({date_hint})",
-                        }
-                    )
-            except Exception:
-                continue
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = []
+        if t_low in ("all", "reddit"):
+            futures.append(executor.submit(fetch_arctic_shift_reddit))
+
+        if clean_key:
+            for platform, q in social_queries:
+                if t_low in ("all", platform.lower()):
+                    futures.append(executor.submit(_fetch_single_serper_platform, platform, q, clean_key, tbs_val))
+
+        for fut in as_completed(futures):
+            items.extend(fut.result())
+
     return items
 
 
-def run_sync(custom_prompt: str | None = None, freshness: str | None = None) -> dict:
+def run_sync(custom_prompt: str | None = None, freshness: str | None = None, platform: str = "all") -> dict:
     if not _SYNC_LOCK.acquire(blocking=False):
         return {
             "fetched": 0,
@@ -369,7 +394,8 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None) -> 
         except ValueError:
             min_keep_score = 7
 
-        candidates = fetch_arctic_shift_reddit() + fetch_serper_channels(serper_key, active_freshness)
+        # Scrape all 8 channels simultaneously
+        candidates = fetch_all_channels_parallel(serper_key, active_freshness, platform)
         saved = 0
         rejected = 0
         notes = []
@@ -392,12 +418,12 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None) -> 
             if key_pool:
                 try:
                     score, summary, service_category, client_region, reply = score_and_draft(item, agent_prompt)
-                    time.sleep(0.35)
+                    time.sleep(0.25)
                     if score < min_keep_score:
                         rejected += 1
                         continue
                 except Exception as exc:
-                    notes.append(f"Gemini ({item['external_id']}): {exc}")
+                    notes.append(f"Gemini ({item['platform']}): {exc}")
             else:
                 notes.append("No Gemini API keys configured.")
 

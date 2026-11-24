@@ -27,7 +27,7 @@ from app.worker import (
 async def lifespan(app: FastAPI):
     async def _loop():
         while True:
-            await asyncio.sleep(300)  # Auto-scan every 5 minutes for first-mover leads
+            await asyncio.sleep(300)  # Auto-scan all 8 platforms every 5 minutes
             try:
                 await asyncio.to_thread(run_sync)
             except Exception as exc:
@@ -131,6 +131,7 @@ class AgentCompilePayload(BaseModel):
 class AgentScanPayload(BaseModel):
     agent_prompt: Optional[str] = None
     freshness: Optional[str] = "qdr:h"
+    platform: Optional[str] = "all"
 
 
 def serialize_lead(row) -> dict:
@@ -349,18 +350,20 @@ def trigger_sync(
 ):
     prompt_to_use = payload.agent_prompt if payload and payload.agent_prompt else None
     freshness_to_use = payload.freshness if payload and payload.freshness else get_setting("search_freshness", "qdr:h")
+    platform_to_use = payload.platform if payload and payload.platform else "all"
 
     if prompt_to_use and prompt_to_use.strip():
         set_setting("agent_prompt", prompt_to_use.strip())
     if freshness_to_use:
         set_setting("search_freshness", freshness_to_use.strip())
 
-    background_tasks.add_task(run_sync, prompt_to_use, freshness_to_use)
+    background_tasks.add_task(run_sync, prompt_to_use, freshness_to_use, platform_to_use)
+    target_label = "all 8 platforms simultaneously" if platform_to_use == "all" else platform_to_use
     return {
         "fetched": 0,
         "saved": 0,
         "qualified": 0,
-        "notes": f"Agent scan started in background with freshness: {freshness_to_use}! Wait 20-30 seconds and refresh.",
+        "notes": f"Parallel scan started across {target_label} ({freshness_to_use})! Wait 15-20 seconds and refresh.",
         "errors": [],
     }
 
