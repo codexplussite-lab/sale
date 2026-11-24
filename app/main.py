@@ -3,6 +3,7 @@ import hmac
 import time
 import base64
 import hashlib
+import asyncio
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query, Request, Depends, BackgroundTasks
 from fastapi.responses import FileResponse, Response, JSONResponse
@@ -21,6 +22,20 @@ from app.worker import (
 )
 
 app = FastAPI(title="CodeXplus Lead Engine")
+
+
+@app.on_event("startup")
+async def start_auto_hunter_loop():
+    async def _loop():
+        while True:
+            await asyncio.sleep(300)  # Auto-scan every 5 minutes for first-mover leads
+            try:
+                await asyncio.to_thread(run_sync)
+            except Exception as exc:
+                print(f"[AutoHunter] Background scan error: {exc}")
+
+    asyncio.create_task(_loop())
+
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -112,7 +127,7 @@ class AgentCompilePayload(BaseModel):
 
 class AgentScanPayload(BaseModel):
     agent_prompt: Optional[str] = None
-    freshness: Optional[str] = "qdr:d"
+    freshness: Optional[str] = "qdr:h"
 
 
 def serialize_lead(row) -> dict:
@@ -334,7 +349,7 @@ def trigger_sync(
     _user: str = Depends(require_auth),
 ):
     prompt_to_use = payload.agent_prompt if payload and payload.agent_prompt else None
-    freshness_to_use = payload.freshness if payload and payload.freshness else get_setting("search_freshness", "qdr:d")
+    freshness_to_use = payload.freshness if payload and payload.freshness else get_setting("search_freshness", "qdr:h")
 
     if prompt_to_use and prompt_to_use.strip():
         set_setting("agent_prompt", prompt_to_use.strip())
@@ -378,7 +393,7 @@ def get_admin_settings(_user: str = Depends(require_auth)):
             "[hiring],looking to hire,need a developer,need an agency,recommend a dev,store redesign,need custom erp,hiring a video editor",
         ),
         "agent_min_score": int(get_setting("agent_min_score", "7")),
-        "search_freshness": get_setting("search_freshness", "qdr:d"),
+        "search_freshness": get_setting("search_freshness", "qdr:h"),
         "x_query": get_setting("x_query", ""),
         "admin_username": get_setting("admin_username", os.environ.get("ADMIN_USERNAME", "admin")),
     }
