@@ -77,6 +77,35 @@ def is_seller_or_chatter(title: str, body: str) -> bool:
     return any(phrase in low_full for phrase in SELLER_BODY_PHRASES)
 
 
+def normalize_url_hash(url: str) -> str:
+    clean = (url or "").split("?")[0].rstrip("/").lower()
+    return hashlib.md5(clean.encode("utf-8")).hexdigest()
+
+
+def parse_serper_age_seconds(date_str: str) -> int | None:
+    """
+    Parses Google/Serper relative timestamps like '45 secs ago', '2 mins ago', '4 minutes ago', '22 hours ago'.
+    Returns age in seconds, or None if Google didn't attach a relative minute/second timestamp.
+    """
+    if not date_str:
+        return None
+    low = date_str.strip().lower()
+    m = re.search(r"(\d+)\s*(sec|second|min|minute|hour|hr|day|week|month|year)", low)
+    if not m:
+        return None
+    val = int(m.group(1))
+    unit = m.group(2)
+    if unit.startswith("sec"):
+        return val
+    if unit.startswith("min"):
+        return val * 60
+    if unit.startswith(("hour", "hr")):
+        return val * 3600
+    if unit.startswith("day"):
+        return val * 86400
+    return 999999
+
+
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30.0, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -106,6 +135,15 @@ def get_db():
         )
         """
     )
+    # Permanent deduplication ledger: remembers every seen post even after you delete it from leads
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS seen_leads (
+            dedup_key TEXT PRIMARY KEY,
+            seen_at TEXT
+        )
+        """
+    )
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(leads)").fetchall()}
     if "pain_point_summary" not in existing_cols:
         cur.execute("ALTER TABLE leads ADD COLUMN pain_point_summary TEXT DEFAULT ''")
@@ -123,6 +161,29 @@ def get_db():
         """
     )
     return conn
+
+
+def is_already_seen(external_id: str, url: str) -> bool:
+    url_hash = normalize_url_hash(url)
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM seen_leads WHERE dedup_key IN (?, ?)", (external_id, url_hash))
+    found = cur.fetchone() is not None
+    if not found:
+        cur.execute("SELECT 1 FROM leads WHERE external_id = ? OR url = ?", (external_id, url))
+        found = cur.fetchone() is not None
+    conn.close()
+    return found
+
+
+def mark_as_seen(external_id: str, url: str):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    url_hash = normalize_url_hash(url)
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO seen_leads (dedup_key, seen_at) VALUES (?, ?)", (external_id, now_iso))
+    cur.execute("INSERT OR IGNORE INTO seen_leads (dedup_key, seen_at) VALUES (?, ?)", (url_hash, now_iso))
+    conn.close()
 
 
 def get_setting(key: str, default: str = "") -> str:
@@ -243,12 +304,12 @@ FOLLOW THIS ACTIVE AGENT MISSION & FILTERING RUBRIC STRICTLY:
 
 CANDIDATE POST TO AUDIT:
 Platform: {lead['platform']}
-Competition Status: {lead.get('freshness_badge', 'Fresh post')}
+Freshness: {lead.get('freshness_badge', 'Posted <5m ago')}
 Title / Author Line: {lead['title']}
 Post Body: {lead['raw_text']}
 
 MANDATORY 3-GATE REJECTION CHECK (IF ANY FAIL -> SET is_buyer=false AND score=1):
-Gate 1 — Author Role Check: Look at the Title/Author Line (e.g., "Ray website & app developer"). If the author's display name/title says THEY are a developer, designer, freelancer, or agency -> FAIL (score 1). (Note: If the author is a client saying "Looking for a website & app developer to build my app", that PASSES!)
+Gate 1 — Author Role Check: Look at the Title/Author Line. If the author's display name/title says THEY are a developer, designer, freelancer, or agency -> FAIL (score 1). (Note: If the author is a client saying "Looking for a website & app developer to build my app", that PASSES!)
 Gate 2 — Paying Client Intent Check: Is the author asking someone to build/design something for them (e.g. "I will pay $500 to create my portfolio website", "Need a mobile app developer", "Looking for graphic designer")? If it is a freelancer advertising "[For Hire]", a book/course request, meme, rant, or tech discussion -> FAIL (score 1).
 Gate 3 — Clear Deliverable Check: Does the post state what they want made (portfolio website, app, software, graphic design, etc.)? If vague chatter -> FAIL (score 1).
 
@@ -299,17 +360,19 @@ Keep it direct, friendly, under 80 words, focused on solving their exact project
     return call_gemini(prompt)
 
 
-def verify_reddit_post_live(client: httpx.Client, permalink: str) -> tuple[bool, int, str]:
+def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int) -> tuple[bool, int, str]:
     """
-    Checks Reddit's live JSON endpoint so posts removed by moderators/AutoMod
-    or having ANY comments (> 0) are skipped immediately.
+    Verifies live on Reddit:
+    1. Not removed/deleted by moderators or AutoMod
+    2. Posted between 20 seconds and 5 minutes ago (<= 300s)
+    3. Strictly 0 comments (num_comments == 0)
     """
     clean_perm = permalink.rstrip("/")
     live_url = f"https://www.reddit.com{clean_perm}.json"
     try:
         resp = client.get(
             live_url,
-            headers={"User-Agent": "CodeXplusLeadHunter/2.0 (by /u/codexplus_bot)"},
+            headers={"User-Agent": "CodeXplusLeadHunter/2.1 (by /u/codexplus_bot)"},
             follow_redirects=True,
         )
         if resp.status_code != 200:
@@ -317,7 +380,6 @@ def verify_reddit_post_live(client: httpx.Client, permalink: str) -> tuple[bool,
         payload = resp.json()
         post_data = payload[0]["data"]["children"][0]["data"]
 
-        # Reject if deleted by user or removed by moderator / AutoMod / spam filter
         if post_data.get("removed_by_category") is not None:
             return False, 0, ""
         author = str(post_data.get("author", ""))
@@ -326,12 +388,18 @@ def verify_reddit_post_live(client: httpx.Client, permalink: str) -> tuple[bool,
         if author in ("", "[deleted]") or selftext in ("[removed]", "[deleted]") or "[removed" in title.lower():
             return False, 0, ""
 
+        # Enforce 0.5 to 5 minute age window (30s to 300s)
+        created_utc = int(post_data.get("created_utc", now_ts))
+        age_sec = now_ts - created_utc
+        if age_sec > 300:
+            return False, age_sec, ""
+
         # Strict 0-comment first-mover enforcement
         live_comments = int(post_data.get("num_comments", 0))
         if live_comments > 0:
-            return False, live_comments, ""
+            return False, age_sec, ""
 
-        return True, 0, selftext
+        return True, max(30, age_sec), selftext
     except Exception:
         return False, 0, ""
 
@@ -347,6 +415,12 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
             if resp.status_code != 200:
                 return []
             for post in resp.json().get("data", []):
+                created_utc = int(post.get("created_utc", now_ts))
+                age_sec = now_ts - created_utc
+                # Strict 5-minute freshness window (300 seconds)
+                if age_sec > 300:
+                    continue
+
                 title = post.get("title", "")
                 body = post.get("selftext", "")
                 num_comments = int(post.get("num_comments", 0))
@@ -360,9 +434,13 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
 
                 post_id = post.get("id", "")
                 permalink = post.get("permalink", f"/r/{sub}/comments/{post_id}")
+                full_url = f"https://www.reddit.com{permalink}"
+                ext_id = f"reddit_{post_id}"
 
-                # Verify live on Reddit: must not be removed and must still have 0 comments
-                is_live, _, live_body = verify_reddit_post_live(client, permalink)
+                if is_already_seen(ext_id, full_url):
+                    continue
+
+                is_live, live_age_sec, live_body = verify_reddit_post_live(client, permalink, now_ts)
                 if not is_live:
                     continue
 
@@ -370,17 +448,16 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 if is_seller_or_chatter(title, final_body):
                     continue
 
-                created_utc = int(post.get("created_utc", now_ts))
-                mins_ago = max(1, (now_ts - created_utc) // 60)
+                age_label = f"{live_age_sec}s ago" if live_age_sec < 60 else f"{live_age_sec // 60}m ago"
                 found.append(
                     {
-                        "external_id": f"reddit_{post_id}",
+                        "external_id": ext_id,
                         "platform": "Reddit",
                         "author": post.get("author", "unknown"),
                         "title": title,
                         "raw_text": f"{title}\n{final_body}"[:1200],
-                        "url": f"https://www.reddit.com{permalink}",
-                        "freshness_badge": f"Posted {mins_ago}m ago · 0 replies",
+                        "url": full_url,
+                        "freshness_badge": f"Posted {age_label} · 0 replies",
                     }
                 )
     except Exception:
@@ -404,7 +481,7 @@ def fetch_arctic_shift_reddit() -> list[dict]:
     keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
 
     now_ts = int(time.time())
-    after_ts = now_ts - 2700  # Strict 45-minute window
+    after_ts = now_ts - 300  # Strict 5-minute window (300 seconds)
     items = []
 
     with ThreadPoolExecutor(max_workers=len(subreddits)) as pool:
@@ -414,14 +491,14 @@ def fetch_arctic_shift_reddit() -> list[dict]:
     return items
 
 
-def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs_val: str) -> list[dict]:
+def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, max_age_sec: int = 300) -> list[dict]:
     found = []
     try:
         with httpx.Client(timeout=12.0) as client:
             resp = client.post(
                 "https://google.serper.dev/search",
                 headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
-                json={"q": query, "num": 6, "tbs": tbs_val},
+                json={"q": query, "num": 10, "tbs": "qdr:h"},
             )
             if resp.status_code != 200:
                 return []
@@ -429,10 +506,20 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
                 link = res.get("link", "")
                 title = res.get("title", "")
                 snippet = res.get("snippet", "")
+                date_hint = str(res.get("date", "")).strip()
+
+                # Strict 0.5 to 5-minute age check: reject anything older than 5 minutes (300s)
+                parsed_sec = parse_serper_age_seconds(date_hint)
+                if parsed_sec is None or parsed_sec > max_age_sec:
+                    continue
+
                 if is_seller_or_chatter(title, snippet):
                     continue
-                date_hint = res.get("date", "Past 1h")
-                ext_id = f"{platform.lower()}_{hashlib.md5(link.encode()).hexdigest()[:12]}"
+
+                ext_id = f"{platform.lower()}_{normalize_url_hash(link)[:12]}"
+                if is_already_seen(ext_id, link):
+                    continue
+
                 found.append(
                     {
                         "external_id": ext_id,
@@ -441,7 +528,7 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
                         "title": title,
                         "raw_text": f"{title}\n{snippet}"[:1200],
                         "url": link,
-                        "freshness_badge": f"Fresh ({date_hint})",
+                        "freshness_badge": f"Posted {date_hint}",
                     }
                 )
     except Exception:
@@ -450,8 +537,11 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
 
 
 def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
+    """
+    Scrapes ALL 8 platforms simultaneously (Reddit + X + LinkedIn + Threads + Facebook + Telegram + Discord + Twist)
+    and interleaves results across platforms so every channel gets scored fairly.
+    """
     clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
-    tbs_val = (freshness or "qdr:h").strip()
     strict_default_dork = '("[hiring]" OR "i will pay" OR "will pay" OR "looking for a developer" OR "need someone to create" OR "create my portfolio" OR "build a mobile app" OR "need a graphic designer") ("budget" OR "$") -"for hire" -"hire me" -"open to work"'
     base_dork = get_setting("x_query", strict_default_dork)
 
@@ -466,22 +556,32 @@ def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", targe
     ]
 
     t_low = (target_platform or "all").strip().lower()
-    items = []
+    by_platform: dict[str, list[dict]] = {}
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = []
+        future_map = {}
         if t_low in ("all", "reddit"):
-            futures.append(executor.submit(fetch_arctic_shift_reddit))
+            future_map[executor.submit(fetch_arctic_shift_reddit)] = "Reddit"
 
         if clean_key:
             for platform, q in social_queries:
                 if t_low in ("all", platform.lower()):
-                    futures.append(executor.submit(_fetch_single_serper_platform, platform, q, clean_key, tbs_val))
+                    future_map[executor.submit(_fetch_single_serper_platform, platform, q, clean_key, 300)] = platform
 
-        for fut in as_completed(futures):
-            items.extend(fut.result())
+        for fut in as_completed(future_map):
+            plat = future_map[fut]
+            by_platform.setdefault(plat, []).extend(fut.result())
 
-    return items
+    # Round-robin interleave across all 8 platforms so no single channel dominates
+    interleaved = []
+    max_len = max((len(v) for v in by_platform.values()), default=0)
+    for i in range(max_len):
+        for plat in ["Reddit", "X", "LinkedIn", "Threads", "Facebook", "Telegram", "Discord", "Twist"]:
+            bucket = by_platform.get(plat, [])
+            if i < len(bucket):
+                interleaved.append(bucket[i])
+
+    return interleaved
 
 
 def run_sync(custom_prompt: str | None = None, freshness: str | None = None, platform: str = "all") -> dict:
@@ -499,25 +599,22 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": "No Gemini API keys configured."}
 
         agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
-        active_freshness = (freshness or "").strip() or get_setting("search_freshness", "qdr:h")
         try:
             min_keep_score = int(get_setting("agent_min_score", "7"))
         except ValueError:
             min_keep_score = 7
 
-        candidates = fetch_all_channels_parallel(serper_key, active_freshness, platform)
+        candidates = fetch_all_channels_parallel(serper_key, "qdr:h", platform)
         saved = 0
         rejected = 0
         notes = []
 
         for item in candidates:
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT id FROM leads WHERE external_id = ?", (item["external_id"],))
-            exists = cur.fetchone() is not None
-            conn.close()
-            if exists:
+            if is_already_seen(item["external_id"], item["url"]):
                 continue
+
+            # Record permanently in seen_leads immediately so it never repeats even if rejected or deleted
+            mark_as_seen(item["external_id"], item["url"])
 
             try:
                 score, summary, service_category, client_region, reply = score_and_draft(item, agent_prompt)
