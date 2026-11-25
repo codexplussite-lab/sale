@@ -19,6 +19,8 @@ from app.worker import (
     set_setting,
     test_single_gemini_key,
     generate_queries_from_prompt,
+    get_scan_status,
+    clear_seen_cache,
     DEFAULT_AGENT_PROMPT,
 )
 
@@ -363,9 +365,20 @@ def trigger_sync(
         "fetched": 0,
         "saved": 0,
         "qualified": 0,
-        "notes": f"Parallel scan started across {target_label} ({freshness_to_use})! Wait 15-20 seconds and refresh.",
+        "notes": f"Parallel scan started across {target_label} ({freshness_to_use})! Checking live results...",
         "errors": [],
     }
+
+
+@app.get("/api/sync/status")
+def sync_status(_user: str = Depends(require_auth)):
+    return get_scan_status()
+
+
+@app.post("/api/admin/clear-seen")
+def reset_seen_ledger(_user: str = Depends(require_auth)):
+    cleared = clear_seen_cache()
+    return {"cleared": cleared}
 
 
 @app.post("/api/admin/compile-agent")
@@ -388,11 +401,11 @@ def get_admin_settings(_user: str = Depends(require_auth)):
         "agent_prompt": get_setting("agent_prompt", DEFAULT_AGENT_PROMPT),
         "agent_subreddits": get_setting(
             "agent_subreddits",
-            "forhire,freelance_forhire,DesignJobs,startups,SaaS,shopify,ecommerce,smallbusiness,Entrepreneur",
+            "forhire,freelance_forhire,DesignJobs,slavelabour,startups,SaaS,shopify,smallbusiness,Entrepreneur",
         ),
         "agent_reddit_keywords": get_setting(
             "agent_reddit_keywords",
-            "[hiring],looking to hire,need a developer,need an agency,recommend a dev,store redesign,need custom erp,hiring a video editor",
+            "[hiring],i will pay,will pay,looking to hire,need a developer,create my,build my,need a designer,budget",
         ),
         "agent_min_score": int(get_setting("agent_min_score", "7")),
         "search_freshness": get_setting("search_freshness", "qdr:h"),

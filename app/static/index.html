@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
   <title>CodeXplus | Client Lead Hunter Agent</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -22,16 +22,28 @@
     };
   </script>
   <style>
+    html,
     body {
+      max-width: 100%;
+      overflow-x: hidden;
       background-color: #090b10;
       color: #f1f5f9;
       font-family: Inter, system-ui, -apple-system, sans-serif;
     }
 
     .glass {
-      background: rgba(22, 27, 41, 0.85);
+      background: rgba(22, 27, 41, 0.88);
       backdrop-filter: blur(12px);
       border: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
     }
 
     ::-webkit-scrollbar {
@@ -46,18 +58,18 @@
   </style>
 </head>
 
-<body class="min-h-screen antialiased">
+<body class="min-h-screen antialiased selection:bg-indigo-500/30">
 
   <!-- LOGIN VIEW -->
   <div id="loginView"
     class="hidden min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-950/40 via-obsidian to-obsidian">
-    <div class="glass w-full max-w-md rounded-2xl p-8 shadow-2xl">
+    <div class="glass w-full max-w-md rounded-2xl p-6 sm:p-8 shadow-2xl">
       <div class="flex items-center gap-3 mb-6">
         <div
-          class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-indigo-500/30">
+          class="w-10 h-10 shrink-0 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-indigo-500/30">
           CX</div>
         <div>
-          <h1 class="text-xl font-bold text-white tracking-tight">CodeXplus Lead Engine</h1>
+          <h1 class="text-lg sm:text-xl font-bold text-white tracking-tight">CodeXplus Lead Engine</h1>
           <p class="text-xs text-slate-400">Sign in to access Agent Studio & Leads</p>
         </div>
       </div>
@@ -86,145 +98,149 @@
 
   <!-- APP SHELL -->
   <div id="appView" class="hidden min-h-screen flex flex-col">
-    <!-- TOP NAVBAR -->
+    <!-- RESPONSIVE TOP NAVBAR -->
     <header class="sticky top-0 z-30 glass border-b border-slate-800/80">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
+      <div
+        class="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-2.5">
+        <div class="flex items-center gap-2.5">
           <div
-            class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/30">
+            class="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-sm sm:text-base shadow-md shadow-indigo-500/30">
             CX</div>
           <div>
-            <span class="font-bold text-white tracking-tight text-base">CodeXplus</span>
+            <span class="font-bold text-white tracking-tight text-sm sm:text-base">CodeXplus</span>
             <span
-              class="hidden sm:inline-block ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">8-Channel
+              class="hidden md:inline-block ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">8-Channel
               Parallel Hunter</span>
           </div>
         </div>
 
-        <!-- TAB SWITCHER -->
-        <nav class="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-          <button id="tabLeadsBtn" onclick="switchTab('leads')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white">
-            Leads & Quick Agent
-          </button>
-          <button id="tabAdminBtn" onclick="switchTab('admin')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white">
-            Agent Studio & Keys
-          </button>
-        </nav>
-
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-1.5 sm:gap-2.5 order-2 sm:order-3">
           <button onclick="loadLeads()" title="Refresh leads list"
-            class="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition border border-slate-700/70">
-            ↻ Refresh
+            class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition border border-slate-700/70">
+            ↻ <span class="hidden xs:inline">Refresh</span>
           </button>
           <button onclick="logout()"
-            class="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-medium transition border border-slate-700/70">
+            class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-medium transition border border-slate-700/70">
             Logout
           </button>
         </div>
+
+        <!-- TAB SWITCHER (Full width row on mobile, centered on desktop) -->
+        <nav
+          class="w-full sm:w-auto order-3 sm:order-2 flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+          <button id="tabLeadsBtn" onclick="switchTab('leads')"
+            class="flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white text-center">
+            Leads & Quick Agent
+          </button>
+          <button id="tabAdminBtn" onclick="switchTab('admin')"
+            class="flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white text-center">
+            Agent Studio & Keys
+          </button>
+        </nav>
       </div>
     </header>
 
     <!-- INLINE STATUS TOAST BANNER -->
-    <div id="statusBanner" class="hidden max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4">
-      <div id="statusBannerBox" class="rounded-xl px-4 py-3 text-xs flex items-center justify-between gap-3 border">
-        <span id="statusBannerText"></span>
-        <button onclick="hideBanner()" class="text-slate-400 hover:text-white font-bold">✕</button>
+    <div id="statusBanner" class="hidden max-w-7xl w-full mx-auto px-3 sm:px-6 pt-3 sm:pt-4">
+      <div id="statusBannerBox"
+        class="rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs flex items-start sm:items-center justify-between gap-3 border break-words">
+        <span id="statusBannerText" class="leading-relaxed"></span>
+        <button onclick="hideBanner()" class="text-slate-400 hover:text-white font-bold shrink-0">✕</button>
       </div>
     </div>
 
     <!-- LEADS FEED VIEW -->
-    <main id="leadsSection" class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
+    <main id="leadsSection" class="max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 flex-1">
 
       <!-- LIVE AGENT MISSION PROMPT BOX -->
       <div
-        class="glass rounded-2xl p-5 border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 via-slate-900/80 to-slate-900/80 space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
+        class="glass rounded-2xl p-4 sm:p-5 border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 via-slate-900/80 to-slate-900/80 space-y-3">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <h2 class="text-sm font-bold text-white flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Active Lead Hunter Agent Prompt (First-Come-First-Served Mode)
+              <span class="w-2 h-2 shrink-0 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Active Lead Hunter Agent Prompt</span>
             </h2>
-            <p class="text-[11px] text-slate-400">Scans Reddit (last 45m, ≤2 replies) + X, LinkedIn, Threads, Facebook,
+            <p class="text-[11px] text-slate-400 mt-0.5">Scans Reddit (≤1 reply) + X, LinkedIn, Threads, Facebook,
               Telegram, Discord & Twist concurrently.</p>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <select id="quickFreshness"
-              class="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-200">
+              class="col-span-2 sm:col-span-1 px-2.5 py-2 sm:py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-200">
               <option value="qdr:h">Past 1 Hour (First-Mover)</option>
               <option value="qdr:d">Past 24 Hours</option>
               <option value="qdr:w">Past 7 Days</option>
             </select>
             <button type="button" onclick="autoCompileFromDashboard()" id="quickCompileBtn"
-              class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition">
-              ✦ Update Search Dorks
+              class="px-3 py-2 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition text-center">
+              ✦ Update Dorks
             </button>
             <button id="syncBtn" onclick="triggerSync()"
-              class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-emerald-600/20">
+              class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow-lg shadow-emerald-600/20">
               <span id="syncSpinner" class="hidden animate-spin">⟳</span>
               <span id="syncBtnText">Scan All Platforms</span>
             </button>
           </div>
         </div>
         <textarea id="quickAgentPrompt" rows="3"
-          placeholder="Example: Find founders or businesses looking to hire a React/Next.js or mobile app developer with a budget over $500. Reject all freelancers advertising themselves, crypto spam, and unpaid jobs."
-          class="w-full p-3 rounded-xl bg-slate-950/90 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
+          placeholder="Example: Find founders or businesses looking to hire a React/Next.js or mobile app developer with a budget over $500."
+          class="w-full p-3 rounded-xl bg-slate-950/90 border border-slate-700/80 text-sm sm:text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
       </div>
 
       <!-- KPI METRICS -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div class="glass rounded-2xl p-4">
-          <p class="text-xs text-slate-400">Saved Qualified Leads</p>
-          <p id="statTotal" class="text-2xl font-bold text-white mt-1">0</p>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+        <div class="glass rounded-2xl p-3.5 sm:p-4">
+          <p class="text-[11px] sm:text-xs text-slate-400">Saved Qualified Leads</p>
+          <p id="statTotal" class="text-xl sm:text-2xl font-bold text-white mt-1">0</p>
         </div>
-        <div class="glass rounded-2xl p-4">
-          <p class="text-xs text-slate-400">New Unreviewed</p>
-          <p id="statNew" class="text-2xl font-bold text-indigo-400 mt-1">0</p>
+        <div class="glass rounded-2xl p-3.5 sm:p-4">
+          <p class="text-[11px] sm:text-xs text-slate-400">New Unreviewed</p>
+          <p id="statNew" class="text-xl sm:text-2xl font-bold text-indigo-400 mt-1">0</p>
         </div>
-        <div class="glass rounded-2xl p-4">
-          <p class="text-xs text-slate-400">High Intent (Score 7+)</p>
-          <p id="statQualified" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+        <div class="glass rounded-2xl p-3.5 sm:p-4">
+          <p class="text-[11px] sm:text-xs text-slate-400">High Intent (Score 7+)</p>
+          <p id="statQualified" class="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">0</p>
         </div>
-        <div class="glass rounded-2xl p-4">
-          <p class="text-xs text-slate-400">Replied / Pitched</p>
-          <p id="statReplied" class="text-2xl font-bold text-amber-400 mt-1">0</p>
+        <div class="glass rounded-2xl p-3.5 sm:p-4">
+          <p class="text-[11px] sm:text-xs text-slate-400">Replied / Pitched</p>
+          <p id="statReplied" class="text-xl sm:text-2xl font-bold text-amber-400 mt-1">0</p>
         </div>
       </div>
 
       <!-- FILTER BAR -->
-      <div class="glass rounded-2xl p-4 space-y-3.5">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div id="platformPills" class="flex flex-wrap items-center gap-1.5">
+      <div class="glass rounded-2xl p-3.5 sm:p-4 space-y-3.5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <!-- Horizontally swipeable channel pills on mobile -->
+          <div id="platformPills" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
             <button data-platform="all" onclick="setPlatform('all')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">All
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">All
               Channels</button>
             <button data-platform="Reddit" onclick="setPlatform('Reddit')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Reddit</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Reddit</button>
             <button data-platform="X" onclick="setPlatform('X')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">X
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">X
               / Twitter</button>
             <button data-platform="LinkedIn" onclick="setPlatform('LinkedIn')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">LinkedIn</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">LinkedIn</button>
             <button data-platform="Threads" onclick="setPlatform('Threads')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Threads</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Threads</button>
             <button data-platform="Facebook" onclick="setPlatform('Facebook')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Facebook</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Facebook</button>
             <button data-platform="Telegram" onclick="setPlatform('Telegram')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Telegram</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Telegram</button>
             <button data-platform="Discord" onclick="setPlatform('Discord')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Discord</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Discord</button>
             <button data-platform="Twist" onclick="setPlatform('Twist')"
-              class="plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Twist</button>
+              class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700">Twist</button>
           </div>
 
           <button id="clearViewBtn" onclick="confirmClearView()"
-            class="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition">
+            class="w-full sm:w-auto shrink-0 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition text-center">
             Clear View
           </button>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t border-slate-800/80">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 pt-2 border-t border-slate-800/80">
           <div>
             <label class="block text-[11px] text-slate-400 mb-1">Lead Status</label>
             <select id="filterStatus" onchange="loadLeads()"
@@ -284,22 +300,28 @@
       </div>
 
       <!-- LEADS GRID -->
-      <div id="leadsContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+      <div id="leadsContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4"></div>
     </main>
 
     <!-- ADMIN PANEL & AGENT STUDIO VIEW -->
-    <section id="adminSection" class="hidden max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
-      <div class="glass rounded-2xl p-6 space-y-6">
-        <div class="border-b border-slate-800 pb-4 flex flex-wrap items-center justify-between gap-3">
+    <section id="adminSection" class="hidden max-w-5xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 flex-1">
+      <div class="glass rounded-2xl p-4 sm:p-6 space-y-6">
+        <div class="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 class="text-lg font-bold text-white">Agent Studio & 4-Key Gemini Failover Pool</h2>
+            <h2 class="text-base sm:text-lg font-bold text-white">Agent Studio & 4-Key Gemini Failover Pool</h2>
             <p class="text-xs text-slate-400 mt-1">Customize your Lead Hunter Agent instructions, auto-generate search
               dorks, and manage your 4 Gemini API keys.</p>
           </div>
-          <button type="button" onclick="compileAgentQueries()" id="compileBtn"
-            class="px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition">
-            ✦ Auto-Generate Search Queries from Prompt
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" onclick="resetSeenCache()"
+              class="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition">
+              ↻ Reset Seen Cache
+            </button>
+            <button type="button" onclick="compileAgentQueries()" id="compileBtn"
+              class="w-full sm:w-auto px-4 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition">
+              ✦ Auto-Generate Search Queries
+            </button>
+          </div>
         </div>
 
         <!-- AGENT PROMPT & TARGETING -->
@@ -308,7 +330,7 @@
             <label class="block text-xs font-semibold text-indigo-300 mb-1.5">Lead Hunter Agent System Prompt (What to
               Find & What to Reject)</label>
             <textarea id="adminAgentPrompt" rows="5"
-              class="w-full p-3 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
+              class="w-full p-3 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -316,18 +338,18 @@
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Target Subreddits
                 (Comma-separated)</label>
               <input id="adminSubreddits" type="text" placeholder="forhire,freelance_forhire,DesignJobs,startups"
-                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Reddit Title Trigger Keywords</label>
               <input id="adminRedditKeywords" type="text" placeholder="[hiring],looking to hire,need a developer,budget"
-                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Minimum Score to Save (Auto-Discard
                 Below)</label>
               <select id="adminMinScore"
-                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white">
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white">
                 <option value="7">7/10 — Qualified Clients Only (Recommended)</option>
                 <option value="8">8/10 — Strict High-Budget Clients Only</option>
                 <option value="5">5/10 — Broad Capture</option>
@@ -341,12 +363,12 @@
                 LinkedIn, Threads, Facebook, Telegram, Discord, Twist)</label>
               <input id="xQuery" type="text"
                 placeholder='("looking to hire" OR "need a developer") ("budget" OR "$") -"for hire"'
-                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Default Search Freshness</label>
               <select id="adminSearchFreshness"
-                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white">
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white">
                 <option value="qdr:h">Past 1 Hour (First-Mover)</option>
                 <option value="qdr:d">Past 24 Hours</option>
                 <option value="qdr:w">Past 7 Days</option>
@@ -358,53 +380,53 @@
         <!-- 4 GEMINI KEYS GRID -->
         <div class="pt-4 border-t border-slate-800 space-y-3">
           <h3 class="text-sm font-bold text-white">4-Key Gemini Failover Pool</h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between gap-2">
                 <label class="text-xs font-semibold text-indigo-300">Gemini API Key #1 (Primary)</label>
                 <button type="button" onclick="testKey(1)"
-                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 shrink-0">Test
                   Key</button>
               </div>
               <input id="geminiKey1" type="password" placeholder="AIzaSy..."
-                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
-              <p id="keyStatus1" class="text-[11px] text-slate-400">Ready</p>
+                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+              <p id="keyStatus1" class="text-[11px] text-slate-400 break-words">Ready</p>
             </div>
 
-            <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between gap-2">
                 <label class="text-xs font-semibold text-indigo-300">Gemini API Key #2 (Failover 1)</label>
                 <button type="button" onclick="testKey(2)"
-                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 shrink-0">Test
                   Key</button>
               </div>
               <input id="geminiKey2" type="password" placeholder="AIzaSy..."
-                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
-              <p id="keyStatus2" class="text-[11px] text-slate-400">Ready</p>
+                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+              <p id="keyStatus2" class="text-[11px] text-slate-400 break-words">Ready</p>
             </div>
 
-            <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between gap-2">
                 <label class="text-xs font-semibold text-indigo-300">Gemini API Key #3 (Failover 2)</label>
                 <button type="button" onclick="testKey(3)"
-                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 shrink-0">Test
                   Key</button>
               </div>
               <input id="geminiKey3" type="password" placeholder="AIzaSy..."
-                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
-              <p id="keyStatus3" class="text-[11px] text-slate-400">Ready</p>
+                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+              <p id="keyStatus3" class="text-[11px] text-slate-400 break-words">Ready</p>
             </div>
 
-            <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between gap-2">
                 <label class="text-xs font-semibold text-indigo-300">Gemini API Key #4 (Failover 3)</label>
                 <button type="button" onclick="testKey(4)"
-                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">Test
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 shrink-0">Test
                   Key</button>
               </div>
               <input id="geminiKey4" type="password" placeholder="AIzaSy..."
-                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-xs text-white" />
-              <p id="keyStatus4" class="text-[11px] text-slate-400">Ready</p>
+                class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+              <p id="keyStatus4" class="text-[11px] text-slate-400 break-words">Ready</p>
             </div>
           </div>
         </div>
@@ -414,23 +436,23 @@
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Serper.dev API Key</label>
             <input id="serperKey" type="password" placeholder="Your Serper API Key"
-              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Admin Username</label>
             <input id="adminUsername" type="text" placeholder="admin"
-              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">New Admin Password</label>
             <input id="adminPassword" type="password" placeholder="Leave blank to keep current"
-              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-white" />
+              class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
           </div>
         </div>
 
         <div class="flex justify-end pt-2">
           <button onclick="saveAdminSettings()"
-            class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-lg shadow-indigo-600/25">
+            class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-lg shadow-indigo-600/25">
             Save Agent Prompt & All Settings
           </button>
         </div>
@@ -448,7 +470,7 @@
       const txt = document.getElementById('statusBannerText');
       el.classList.remove('hidden');
       txt.textContent = msg;
-      box.className = 'rounded-xl px-4 py-3 text-xs flex items-center justify-between gap-3 border ' + (
+      box.className = 'rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs flex items-start sm:items-center justify-between gap-3 border break-words ' + (
         type === 'error'
           ? 'bg-rose-500/15 border-rose-500/40 text-rose-200'
           : type === 'success'
@@ -506,11 +528,11 @@
       document.getElementById('leadsSection').classList.toggle('hidden', !isLeads);
       document.getElementById('adminSection').classList.toggle('hidden', isLeads);
       document.getElementById('tabLeadsBtn').className = isLeads
-        ? 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white'
-        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white';
+        ? 'flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white text-center'
+        : 'flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white text-center';
       document.getElementById('tabAdminBtn').className = !isLeads
-        ? 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white'
-        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white';
+        ? 'flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-indigo-600 text-white text-center'
+        : 'flex-1 sm:flex-initial px-3 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold transition text-slate-400 hover:text-white text-center';
     }
 
     function setPlatform(plat) {
@@ -518,8 +540,8 @@
       document.querySelectorAll('.plat-pill').forEach(btn => {
         const active = btn.dataset.platform === plat;
         btn.className = active
-          ? 'plat-pill px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white'
-          : 'plat-pill px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700';
+          ? 'plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white'
+          : 'plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/80 text-slate-300 hover:bg-slate-700';
       });
       const scanText = document.getElementById('syncBtnText');
       if (scanText) {
@@ -565,7 +587,7 @@
       const container = document.getElementById('leadsContainer');
       const leads = data.leads || [];
       if (!leads.length) {
-        container.innerHTML = '<div class="col-span-full glass rounded-2xl p-10 text-center text-sm text-slate-400">No leads match the active filters. Select <strong>All Channels</strong> and click <strong>Scan All Platforms</strong>.</div>';
+        container.innerHTML = '<div class="col-span-full glass rounded-2xl p-8 sm:p-10 text-center text-xs sm:text-sm text-slate-400">No leads match the active filters. Select <strong>All Channels</strong> and click <strong>Scan All Platforms</strong> (or switch freshness to <strong>Past 24 Hours</strong> if nothing posted in the last hour).</div>';
         return;
       }
 
@@ -578,9 +600,9 @@
         const postUrl = lead.post_url || lead.url || '#';
 
         return `
-          <article id="lead-card-${lead.id}" class="glass rounded-2xl p-5 flex flex-col justify-between gap-4">
+          <article id="lead-card-${lead.id}" class="glass rounded-2xl p-4 sm:p-5 flex flex-col justify-between gap-3.5 sm:gap-4">
             <div class="space-y-3">
-              <div class="flex items-start justify-between gap-3">
+              <div class="flex flex-wrap items-start justify-between gap-2">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${escapeHtml(lead.platform)}</span>
                   <span class="px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${scoreColor}">Score ${lead.score}/10</span>
@@ -594,33 +616,33 @@
               </div>
 
               <div>
-                <h3 class="text-sm font-bold text-white leading-snug">${escapeHtml(lead.title)}</h3>
-                <p class="text-xs text-emerald-300/90 mt-1">${escapeHtml(lead.summary)}</p>
+                <h3 class="text-sm font-bold text-white leading-snug break-words">${escapeHtml(lead.title)}</h3>
+                <p class="text-xs text-emerald-300/90 mt-1 break-words">${escapeHtml(lead.summary)}</p>
               </div>
 
-              <p class="text-xs text-slate-400 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 max-h-24 overflow-y-auto whitespace-pre-line">${escapeHtml(lead.raw_text)}</p>
+              <p class="text-xs text-slate-400 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 max-h-24 overflow-y-auto whitespace-pre-line break-words">${escapeHtml(lead.raw_text)}</p>
 
               <div class="space-y-1.5">
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-2">
                   <label class="text-[11px] font-semibold text-slate-300">AI Client Pitch (Gemini)</label>
                   <button onclick="regenerateReply(${lead.id}, this)"
-                    class="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-semibold transition">
-                    ↻ Regenerate Reply
+                    class="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-semibold transition shrink-0">
+                    ↻ Regenerate
                   </button>
                 </div>
                 <textarea id="reply-${lead.id}" rows="3"
-                  class="w-full p-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">${escapeHtml(lead.suggested_reply)}</textarea>
+                  class="w-full p-2.5 rounded-xl bg-slate-900/90 border border-slate-700/80 text-sm sm:text-xs text-slate-100 focus:outline-none focus:border-indigo-500">${escapeHtml(lead.suggested_reply)}</textarea>
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
-              <div class="flex items-center gap-1.5">
-                <button onclick="copyReply(${lead.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white">Copy Pitch</button>
-                <button onclick="markStatus(${lead.id}, 'replied')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">Mark Replied</button>
-                <button onclick="markStatus(${lead.id}, 'ignored')" class="px-2.5 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-400 text-xs">Ignore</button>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
+              <div class="grid grid-cols-3 sm:flex items-center gap-1.5">
+                <button onclick="copyReply(${lead.id})" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white text-center">Copy</button>
+                <button onclick="markStatus(${lead.id}, 'replied')" class="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold text-center">Replied</button>
+                <button onclick="markStatus(${lead.id}, 'ignored')" class="px-2.5 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-400 text-xs text-center">Ignore</button>
               </div>
               <button onclick="deleteLead(${lead.id}, this)" data-armed="false"
-                class="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition">
+                class="w-full sm:w-auto px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition text-center">
                 Delete
               </button>
             </div>
@@ -710,6 +732,14 @@
       }
     }
 
+    async function resetSeenCache() {
+      const res = await fetch('/api/admin/clear-seen', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        showBanner(`Cleared ${data.cleared} entries from seen history. Next scan will re-evaluate all fresh posts.`, 'success');
+      }
+    }
+
     async function autoCompileFromDashboard() {
       const promptText = document.getElementById('quickAgentPrompt').value.trim();
       if (!promptText) return showBanner('Enter an Agent Prompt first.', 'error');
@@ -734,7 +764,7 @@
         await saveAdminSettings(true);
         showBanner('Search dorks & subreddits updated from your prompt! Click "Scan All Platforms" now.', 'success');
       } finally {
-        btn.textContent = '✦ Update Search Dorks';
+        btn.textContent = '✦ Update Dorks';
         btn.disabled = false;
       }
     }
@@ -743,7 +773,7 @@
       const promptText = document.getElementById('adminAgentPrompt').value.trim();
       if (!promptText) return showBanner('Enter an Agent Prompt first.', 'error');
       const btn = document.getElementById('compileBtn');
-      btn.textContent = 'Generating Queries...';
+      btn.textContent = 'Generating...';
       btn.disabled = true;
       try {
         const res = await fetch('/api/admin/compile-agent', {
@@ -762,9 +792,26 @@
         document.getElementById('quickAgentPrompt').value = promptText;
         showBanner('Generated targeted subreddits, keywords, and social search dorks! Click "Save Agent Prompt & All Settings".', 'success');
       } finally {
-        btn.textContent = '✦ Auto-Generate Search Queries from Prompt';
+        btn.textContent = '✦ Auto-Generate Search Queries';
         btn.disabled = false;
       }
+    }
+
+    function pollScanCompletion(attempts = 0) {
+      if (attempts > 15) return;
+      setTimeout(async () => {
+        try {
+          const res = await fetch('/api/sync/status');
+          if (!res.ok) return;
+          const st = await res.json();
+          if (st.running) {
+            pollScanCompletion(attempts + 1);
+          } else {
+            showBanner(st.notes || 'Scan finished.', st.saved > 0 ? 'success' : 'info');
+            await loadLeads();
+          }
+        } catch (_) { }
+      }, 3000);
     }
 
     async function triggerSync() {
@@ -789,9 +836,8 @@
           })
         });
         const data = await res.json();
-        showBanner(data.notes || 'Parallel scan started! Auto-refreshing in 15s...', 'success');
-        setTimeout(() => loadLeads(), 12000);
-        setTimeout(() => loadLeads(), 25000);
+        showBanner(data.notes || 'Parallel scan started across all 8 platforms...', 'info');
+        pollScanCompletion(0);
       } catch (err) {
         showBanner('Sync error: ' + err.message, 'error');
       } finally {
@@ -833,7 +879,7 @@
       });
       const data = await res.json();
       statusEl.textContent = data.detail;
-      statusEl.className = data.ok ? 'text-[11px] text-emerald-400' : 'text-[11px] text-rose-400';
+      statusEl.className = data.ok ? 'text-[11px] text-emerald-400 break-words' : 'text-[11px] text-rose-400 break-words';
     }
 
     async function saveAdminSettings(silent = false) {
