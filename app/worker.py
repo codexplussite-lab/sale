@@ -22,20 +22,7 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
-AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
-
-AGENTROUTER_HEADERS = {
-    "User-Agent": "claude-cli/2.1.158 (external, sdk-cli)",
-    "X-Client-Name": "claude-code",
-}
-
-AGENTROUTER_LATEST_MODELS = [
-    "gpt-5.6-sol",
-    "gpt-5.5",
-    "claude-opus-5",
-    "claude-opus-4-8",
-]
-
+# Official Google Gemini 4 models (plus 3.5 Flash-Lite low-cost fallback)
 GEMINI_4_MODELS = [
     "gemini-4-hydrogen",
     "gemini-4-neon",
@@ -249,105 +236,6 @@ def set_setting(key: str, value: str):
     conn.close()
 
 
-def _normalize_agentrouter_base(base_url: str) -> str:
-    clean = (base_url or AGENTROUTER_DEFAULT_BASE).strip().rstrip("/")
-    if "co.agentrouter.org" in clean:
-        clean = clean.replace("co.agentrouter.org", "agentrouter.org")
-    return clean or AGENTROUTER_DEFAULT_BASE
-
-
-def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
-    clean_base = _normalize_agentrouter_base(base_url)
-    headers = {
-        **AGENTROUTER_HEADERS,
-        "Authorization": f"Bearer {api_key}",
-    }
-    try:
-        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
-            resp = client.get(f"{clean_base}/models", headers=headers)
-            if resp.status_code == 200:
-                payload = resp.json()
-                raw_list = payload.get("data") or payload.get("models") or []
-                live_ids = [
-                    m.get("id")
-                    for m in raw_list
-                    if isinstance(m, dict) and m.get("id")
-                ]
-                if live_ids:
-                    matched = []
-                    for target in AGENTROUTER_LATEST_MODELS:
-                        for lid in live_ids:
-                            if lid == target or lid.endswith(f"/{target}"):
-                                if lid not in matched:
-                                    matched.append(lid)
-                    for lid in live_ids:
-                        low = lid.lower()
-                        if ("claude" in low or "gpt-" in low) and lid not in matched:
-                            matched.append(lid)
-                    return matched[:4] if matched else live_ids[:4]
-    except Exception:
-        pass
-    return list(AGENTROUTER_LATEST_MODELS)
-
-
-def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE, models: list[str] | None = None) -> str:
-    clean_key = (api_key or "").strip()
-    if not clean_key:
-        raise RuntimeError("Empty AgentRouter key")
-    clean_base = _normalize_agentrouter_base(base_url)
-    model_list = models if models else get_agentrouter_models(clean_key, clean_base)
-    headers = {
-        **AGENTROUTER_HEADERS,
-        "Authorization": f"Bearer {clean_key}",
-        "Content-Type": "application/json",
-    }
-    errors = []
-
-    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
-        for model in model_list[:4]:
-            try:
-                resp = client.post(
-                    f"{clean_base}/chat/completions",
-                    headers=headers,
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2,
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {}).get("content", "")
-                        if msg and msg.strip():
-                            return msg.strip()
-                    errors.append(f"AgentRouter ({model}): Empty content")
-                    continue
-
-                err_msg = resp.text[:140].replace("\n", " ")
-                errors.append(f"AgentRouter ({model}) HTTP {resp.status_code}: {err_msg}")
-                if resp.status_code in (401, 403):
-                    break
-            except Exception as exc:
-                errors.append(f"AgentRouter ({model}): {exc}")
-                continue
-
-    raise RuntimeError("AgentRouter failed -> " + " | ".join(errors[:2]))
-
-
-def test_agentrouter_key(api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE) -> dict:
-    clean_key = (api_key or "").strip()
-    if not clean_key:
-        return {"ok": False, "detail": "Empty AgentRouter key"}
-    try:
-        models = get_agentrouter_models(clean_key, base_url)
-        out = call_agentrouter("Reply with the single word: OK", clean_key, base_url, models)
-        return {"ok": True, "detail": f"Active ({out[:15]}) · Models: {', '.join(models)}"}
-    except Exception as exc:
-        return {"ok": False, "detail": str(exc)[:180]}
-
-
 def get_gemini_key_pool() -> list[tuple[str, str]]:
     pool = []
     seen = set()
@@ -367,11 +255,11 @@ def get_gemini_key_pool() -> list[tuple[str, str]]:
 def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
     keys = override_keys if override_keys is not None else get_gemini_key_pool()
     if not keys:
-        raise RuntimeError("No Gemini API keys configured.")
+        raise RuntimeError("No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio.")
 
     errors = []
 
-    with httpx.Client(timeout=10.0) as client:
+    with httpx.Client(timeout=12.0) as client:
         for key_label, api_key in keys:
             for model in GEMINI_4_MODELS:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -400,24 +288,12 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
-    errors = []
-    ar_key = get_setting("agentrouter_api_key")
-    ar_base = get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE)
-    if ar_key:
-        try:
-            return call_agentrouter(prompt, ar_key, ar_base, cached_ar_models)
-        except Exception as exc:
-            errors.append(str(exc))
+    """Uses ONLY the 4-key Gemini 4 pool (Hydrogen, Neon, Argon, 3.5 Flash-Lite)."""
+    return call_gemini_only(prompt)
 
-    if get_gemini_key_pool():
-        try:
-            return call_gemini_only(prompt)
-        except Exception as exc:
-            errors.append(str(exc))
 
-    if not errors:
-        raise RuntimeError("No AI keys configured. Add AgentRouter Key or Gemini Key #1-#4 in Admin Panel.")
-    raise RuntimeError(" | ".join(errors))
+def test_agentrouter_key(api_key: str, base_url: str = "") -> dict:
+    return {"ok": False, "detail": "Disabled — running exclusively on Gemini 4 key pool."}
 
 
 def test_single_gemini_key(api_key: str) -> dict:
@@ -486,7 +362,7 @@ Respond ONLY in valid JSON:
   "reply": "Direct tailored pitch mentioning https://codexplus.site"
 }}"""
 
-    raw = call_ai(prompt, cached_ar_models)
+    raw = call_ai(prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     is_buyer = bool(parsed.get("is_buyer", False))
@@ -730,16 +606,13 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
     )
     try:
         serper_key = get_setting("serper_api_key")
-        ar_key = get_setting("agentrouter_api_key")
-        ar_base = get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE)
         gemini_pool = get_gemini_key_pool()
 
-        if not ar_key and not gemini_pool:
-            msg = "No AI keys configured. Add AgentRouter API Key or Gemini Key #1-#4 in Agent Studio."
+        if not gemini_pool:
+            msg = "No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio."
             _LAST_SCAN_STATUS.update({"running": False, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()})
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
-        cached_ar_models = get_agentrouter_models(ar_key, ar_base) if ar_key else None
         agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
         active_freshness = (freshness or "").strip() or get_setting("search_freshness", "qdr:h")
         try:
@@ -748,11 +621,10 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             min_keep_score = 7
 
         candidates = fetch_all_channels_parallel(serper_key, active_freshness, platform)
-        unique_candidates = []
-        for item in candidates:
-            if not is_already_seen(item["external_id"], item["url"]):
-                mark_as_seen(item["external_id"], item["url"])
-                unique_candidates.append(item)
+        unique_candidates = [
+            item for item in candidates
+            if not is_already_seen(item["external_id"], item["url"])
+        ]
 
         if not unique_candidates:
             msg = f"Scan complete: 0 brand-new posts found in {active_freshness}. Try 'Past 24 Hours' or Reset Seen Cache."
@@ -761,14 +633,14 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             )
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
-        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via AgentRouter & Gemini 4..."
+        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via Gemini 4 pool..."
 
         saved = 0
         rejected = 0
         notes = []
 
         def _audit_one(item: dict):
-            return item, score_and_draft(item, agent_prompt, cached_ar_models)
+            return item, score_and_draft(item, agent_prompt)
 
         with ThreadPoolExecutor(max_workers=4) as ai_pool:
             futures = [ai_pool.submit(_audit_one, item) for item in unique_candidates[:20]]
@@ -778,6 +650,8 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
                 except Exception as exc:
                     notes.append(str(exc)[:120])
                     continue
+
+                mark_as_seen(item["external_id"], item["url"])
 
                 if score < min_keep_score:
                     rejected += 1
