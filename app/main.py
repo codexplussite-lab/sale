@@ -27,6 +27,36 @@ templates = Jinja2Templates(directory="app/templates")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "codexplus2026")
 
 
+def _render_login_html(error: str = "") -> str:
+    err_block = f'<p style="color:#f87171;margin-bottom:12px;font-size:14px;">{error}</p>' if error else ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeXplus Lead Engine — Login</title>
+  <style>
+    body {{ background:#0b0f19; color:#e2e8f0; font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }}
+    .card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:32px; width:100%; max-width:360px; box-shadow:0 10px 30px rgba(0,0,0,0.4); }}
+    h1 {{ font-size:20px; margin:0 0 8px; color:#f8fafc; }}
+    p.sub {{ color:#94a3b8; font-size:13px; margin:0 0 20px; }}
+    input {{ width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f8fafc; margin-bottom:14px; font-size:14px; }}
+    button {{ width:100%; padding:10px; border:none; border-radius:8px; background:#10b981; color:#052e16; font-weight:700; font-size:14px; cursor:pointer; }}
+    button:hover {{ background:#34d399; }}
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <h1>CodeXplus Lead Engine</h1>
+    <p class="sub">Enter admin password to access lead scanner</p>
+    {err_block}
+    <input type="password" name="password" placeholder="Admin password" required autofocus />
+    <button type="submit">Sign In</button>
+  </form>
+</body>
+</html>"""
+
+
 class SyncRequest(BaseModel):
     prompt: str | None = None
     freshness: str | None = None
@@ -67,7 +97,7 @@ def health():
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     if not _is_authed(request):
-        return templates.TemplateResponse("login.html", {"request": request, "error": ""})
+        return HTMLResponse(content=_render_login_html())
 
     conn = get_db()
     cur = conn.cursor()
@@ -108,7 +138,7 @@ def login(request: Request, password: str = Form(...)):
         resp = RedirectResponse(url="/", status_code=303)
         resp.set_cookie("cx_auth", ADMIN_PASSWORD, httponly=True, max_age=86400 * 30)
         return resp
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid password"})
+    return HTMLResponse(content=_render_login_html("Invalid password"), status_code=401)
 
 
 @app.post("/logout")
