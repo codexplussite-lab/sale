@@ -1,7 +1,7 @@
 import os
 import threading
 from fastapi import FastAPI, Request, HTTPException, Form
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from app.worker import (
@@ -23,6 +23,8 @@ from app.worker import (
 app = FastAPI(title="CodeXplus Lead Engine")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "codexplus2026")
 
+FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#10b981"/><text x="16" y="22" font-size="16" font-weight="bold" font-family="sans-serif" text-anchor="middle" fill="#052e16">C+</text></svg>'
+
 
 def _render_login_html(error: str = "") -> str:
     err_block = f'<p style="color:#f87171;margin-bottom:12px;font-size:14px;">{error}</p>' if error else ""
@@ -31,6 +33,7 @@ def _render_login_html(error: str = "") -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
   <title>CodeXplus Lead Engine — Login</title>
   <style>
     body {{ background:#0b0f19; color:#e2e8f0; font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }}
@@ -59,6 +62,7 @@ DASHBOARD_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
   <title>CodeXplus Lead Engine</title>
   <style>
     :root { --bg:#090d16; --card:#111827; --border:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --green:#10b981; --indigo:#6366f1; }
@@ -442,6 +446,11 @@ def _is_authed(request: Request) -> bool:
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(content=FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/", response_class=HTMLResponse)
