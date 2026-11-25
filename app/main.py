@@ -31,7 +31,7 @@ from app.worker import (
 async def lifespan(app: FastAPI):
     async def _loop():
         while True:
-            await asyncio.sleep(300)
+            await asyncio.sleep(300)  # Auto-scan all 8 platforms every 5 minutes
             try:
                 await asyncio.to_thread(run_sync)
             except Exception as exc:
@@ -49,7 +49,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 COOKIE_NAME = "cx_lead_session"
-SESSION_TTL = 60 * 60 * 24 * 7
+SESSION_TTL = 60 * 60 * 24 * 7  # 7 days
 
 
 def get_secret() -> bytes:

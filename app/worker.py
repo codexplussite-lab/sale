@@ -22,16 +22,22 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
-AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
-AGENTROUTER_FALLBACK_MODELS = [
-    "claude-sonnet-4-5",
-    "gpt-4.1",
-    "gpt-4o",
-    "deepseek-v3",
-    "deepseek-r1",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "qwen-max",
+AGENTROUTER_DEFAULT_BASE = "https://co.agentrouter.org/v1"
+
+# Exact live Claude & ChatGPT/OpenAI model IDs on co.agentrouter.org/v1
+AGENTROUTER_LATEST_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+]
+
+# Official Google Gemini 4 models (plus 3.5 Flash-Lite low-cost fallback)
+GEMINI_4_MODELS = [
+    "gemini-4-hydrogen",
+    "gemini-4-neon",
+    "gemini-4-argon",
+    "gemini-3.5-flash-lite",
 ]
 
 DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who want to pay someone to create or build a project for them—for example:
@@ -241,27 +247,41 @@ def set_setting(key: str, value: str):
 
 
 def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
-    """Fetches all live models enabled on the user's AgentRouter account, falling back to standard catalog."""
+    """
+    Discovers live Claude and ChatGPT/OpenAI models on AgentRouter,
+    prioritizing gpt-5.6-sol, gpt-5.5, claude-opus-5, and claude-opus-4-8.
+    """
     clean_base = (base_url or AGENTROUTER_DEFAULT_BASE).rstrip("/")
     try:
-        with httpx.Client(timeout=6.0) as client:
+        with httpx.Client(timeout=5.0) as client:
             resp = client.get(
                 f"{clean_base}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             if resp.status_code == 200:
-                data = resp.json().get("data", [])
-                live_ids = [m.get("id") for m in data if isinstance(m, dict) and m.get("id")]
+                payload = resp.json()
+                raw_list = payload.get("data") or payload.get("models") or []
+                live_ids = [
+                    m.get("id")
+                    for m in raw_list
+                    if isinstance(m, dict) and m.get("id")
+                ]
                 if live_ids:
-                    # Merge live models with preferred ordering
-                    ordered = [m for m in AGENTROUTER_FALLBACK_MODELS if m in live_ids]
-                    for m in live_ids:
-                        if m not in ordered:
-                            ordered.append(m)
-                    return ordered
+                    matched = []
+                    for target in AGENTROUTER_LATEST_MODELS:
+                        for lid in live_ids:
+                            if lid == target or lid.endswith(f"/{target}"):
+                                if lid not in matched:
+                                    matched.append(lid)
+                    for lid in live_ids:
+                        low = lid.lower()
+                        if ("claude" in low or "gpt-" in low) and lid not in matched:
+                            matched.append(lid)
+                    if matched:
+                        return matched[:4]
     except Exception:
         pass
-    return list(AGENTROUTER_FALLBACK_MODELS)
+    return list(AGENTROUTER_LATEST_MODELS)
 
 
 def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE, models: list[str] | None = None) -> str:
@@ -273,7 +293,7 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
     errors = []
 
     with httpx.Client(timeout=10.0) as client:
-        for model in model_list:
+        for model in model_list[:4]:
             try:
                 resp = client.post(
                     f"{clean_base}/chat/completions",
@@ -305,7 +325,7 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
                 errors.append(f"AgentRouter ({model}): {exc}")
                 continue
 
-    raise RuntimeError("AgentRouter failed -> " + " | ".join(errors[:3]))
+    raise RuntimeError("AgentRouter failed -> " + " | ".join(errors[:2]))
 
 
 def test_agentrouter_key(api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE) -> dict:
@@ -314,8 +334,8 @@ def test_agentrouter_key(api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE)
         return {"ok": False, "detail": "Empty AgentRouter key"}
     try:
         models = get_agentrouter_models(clean_key, base_url)
-        out = call_agentrouter("Reply with the single word: OK", clean_key, base_url, models[:4])
-        return {"ok": True, "detail": f"Active ({out[:15]}) · {len(models)} models loaded"}
+        out = call_agentrouter("Reply with the single word: OK", clean_key, base_url, models)
+        return {"ok": True, "detail": f"Active ({out[:15]}) · Models: {', '.join(models)}"}
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:180]}
 
@@ -341,12 +361,11 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
     if not keys:
         raise RuntimeError("No Gemini API keys configured.")
 
-    models = ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     errors = []
 
-    with httpx.Client(timeout=9.0) as client:
+    with httpx.Client(timeout=10.0) as client:
         for key_label, api_key in keys:
-            for model in models:
+            for model in GEMINI_4_MODELS:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 try:
                     resp = client.post(
@@ -361,22 +380,23 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
                         errors.append(f"{key_label} ({model}): Empty response")
                         continue
 
-                    err_msg = resp.text[:120].replace("\n", " ")
+                    err_msg = resp.text[:100].replace("\n", " ")
                     errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                    if resp.status_code in (400, 401, 403):
+                    # Immediately jump to the next key on auth error OR 429 quota limit
+                    if resp.status_code in (400, 401, 403, 429):
                         break
                 except Exception as exc:
                     errors.append(f"{key_label} ({model}): {exc}")
                     continue
 
-    raise RuntimeError("Gemini pool failed -> " + " | ".join(errors[:3]))
+    raise RuntimeError("Gemini 4 pool failed -> " + " | ".join(errors[:3]))
 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
     """
     Unified AI Router:
-    1. Tries AgentRouter across all available models first (if configured).
-    2. Automatically fails over to the 4-key Gemini pool.
+    1. Tries AgentRouter (gpt-5.6-sol, gpt-5.5, claude-opus-5, claude-opus-4-8) first if configured.
+    2. Automatically fails over to the 4-key Gemini 4 pool (Hydrogen, Neon, Argon, 3.5 Flash-Lite).
     """
     errors = []
     ar_key = get_setting("agentrouter_api_key")
@@ -739,7 +759,7 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             )
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
-        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates in parallel via AI..."
+        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via AgentRouter & Gemini 4..."
 
         saved = 0
         rejected = 0
