@@ -30,8 +30,8 @@ DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and busin
 - "Need SEO, GEO, social media marketing, or custom Arduino hardware/software"
 
 BUYER SIGNALS TO PRIORITIZE (SCORE 8-10):
-- Phrases like "I will pay", "paying $", "budget", "$500", "need someone to create my...", "looking to hire", "who can build", "send quotes/rates".
-- Clients asking someone to build THEIR portfolio website, business website, mobile app, software, or graphic design.
+- Phrases like "I will pay", "paying $", "budget", "$500", "need someone to create my...", "looking to hire", "who can build", "looking for a developer/designer".
+- Clients asking someone to build THEIR portfolio website, business website, mobile app, software, or graphic design (even if they haven't stated the exact dollar budget yet, score 7-8 if the project need is real).
 
 STRICT SELLER / CHATTER EXCLUSIONS (SCORE 1 AND SET is_buyer=false):
 - The post author's display name/header says they are a developer, designer, freelancer, or agency (e.g., "Ray website & app developer", "John | UI/UX Designer").
@@ -75,6 +75,8 @@ SELLER_AUTHOR_TITLES = [
     "graphic designer",
     "ui/ux designer",
 ]
+
+BROAD_BUYER_DORK = '("[hiring]" OR "looking to hire" OR "looking for a developer" OR "need a developer" OR "need a website" OR "need an app" OR "create my portfolio" OR "need a graphic designer" OR "i will pay") -"for hire" -"hire me" -"open to work"'
 
 
 def get_scan_status() -> dict:
@@ -290,7 +292,7 @@ def test_single_gemini_key(api_key: str) -> dict:
 
 def generate_queries_from_prompt(agent_prompt: str) -> dict:
     compiler_prompt = f"""You are a search query engineer for a freelance/agency client lead scraper.
-Convert the user's Lead Hunter Agent Prompt into strict search parameters that ONLY match paying clients who say things like "I will pay $500", "need someone to create my portfolio website", "looking for a mobile app developer", or "need a graphic designer".
+Convert the user's Lead Hunter Agent Prompt into high-recall search parameters that match real clients looking for developers, designers, websites, mobile apps, software, or marketing—without over-restricting so results actually come back.
 
 USER AGENT PROMPT:
 {agent_prompt}
@@ -298,22 +300,22 @@ USER AGENT PROMPT:
 Return ONLY valid JSON with these exact keys:
 {{
   "subreddits": "comma-separated relevant subreddits without r/, e.g. forhire,freelance_forhire,DesignJobs,slavelabour,startups,SaaS,shopify,smallbusiness",
-  "reddit_keywords": "comma-separated lowercase trigger phrases to require in Reddit titles, e.g. [hiring],i will pay,will pay,looking to hire,need a developer,create my,build my,budget",
-  "serper_dork": "Google search boolean query without site: prefix that matches clients paying for websites, portfolio sites, mobile apps, software, or graphic design, e.g. (\\"[hiring]\\" OR \\"i will pay\\" OR \\"will pay\\" OR \\"looking for a developer\\" OR \\"need someone to create\\" OR \\"create my portfolio\\" OR \\"build a mobile app\\" OR \\"need a graphic designer\\") (\\"budget\\" OR \\"$\\") -\\"for hire\\" -\\"hire me\\" -\\"open to work\\""
+  "reddit_keywords": "comma-separated lowercase trigger phrases to match in Reddit titles/posts, e.g. [hiring],looking to hire,looking for a,need a,want to build,create my,build my,budget",
+  "serper_dork": "Google search boolean query without site: prefix that finds clients looking to hire without requiring exact long sentences, e.g. (\\"[hiring]\\" OR \\"looking to hire\\" OR \\"looking for a developer\\" OR \\"need a developer\\" OR \\"need a website\\" OR \\"need an app\\" OR \\"need a graphic designer\\") -\\"for hire\\" -\\"hire me\\" -\\"open to work\\""
 }}"""
     raw = call_gemini(compiler_prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     return {
         "subreddits": str(parsed.get("subreddits", "forhire,freelance_forhire,DesignJobs,slavelabour,startups,SaaS,shopify,smallbusiness,Entrepreneur")),
-        "reddit_keywords": str(parsed.get("reddit_keywords", "[hiring],i will pay,will pay,looking to hire,need a developer,create my,build my,need a designer,budget")),
-        "serper_dork": str(parsed.get("serper_dork", '("[hiring]" OR "i will pay" OR "will pay" OR "looking for a developer" OR "need someone to create" OR "create my portfolio" OR "build a mobile app" OR "need a graphic designer") ("budget" OR "$") -"for hire" -"hire me" -"open to work"')),
+        "reddit_keywords": str(parsed.get("reddit_keywords", "[hiring],looking to hire,looking for a,need a,want to build,create my,build my,i will pay,budget")),
+        "serper_dork": str(parsed.get("serper_dork", BROAD_BUYER_DORK)),
     }
 
 
 def score_and_draft(lead: dict, agent_prompt: str) -> tuple[int, str, str, str, str]:
     prompt = f"""You are a strict Buyer-vs-Seller Lead Auditor for CodeXplus (https://codexplus.site).
-Your ONLY job is to pass posts where a REAL PAYING CLIENT wants to pay someone to create/build a portfolio website, business website, mobile app, custom software, graphic design, marketing/SEO, or Arduino project.
+Your ONLY job is to pass posts where a REAL PAYING CLIENT wants to hire someone to create/build a portfolio website, business website, mobile app, custom software, graphic design, marketing/SEO, or Arduino project.
 
 FOLLOW THIS ACTIVE AGENT MISSION & FILTERING RUBRIC STRICTLY:
 {agent_prompt}
@@ -330,14 +332,14 @@ Gate 2 — Paying Client Intent Check: Is the author asking someone to build/des
 Gate 3 — Clear Deliverable Check: Does the post state what they want made (portfolio website, app, software, graphic design, etc.)? If vague chatter -> FAIL (score 1).
 
 ONLY if ALL 3 GATES PASS:
-- Score 7-8 if they clearly state the project they want built/designed.
+- Score 7-8 if they clearly state the project they want built/designed (even if budget is not yet mentioned).
 - Score 9-10 if they also state a budget ($500, $1,000, "I will pay...", etc.) or urgent timeline.
 - Write a direct, concise outreach message from CodeXplus (https://codexplus.site) addressing their exact project and budget.
 
 Respond ONLY in valid JSON:
 {{
   "is_buyer": true,
-  "score": 9,
+  "score": 8,
   "service_category": "Web/App Dev | Custom Software/AI | Graphic Design | Marketing/SEO | Hardware/IoT",
   "client_region": "USA | UK/Europe | Gulf/UAE | Pakistan | Global",
   "summary": "Client wants to build [specific project] — Budget: [stated budget or Not specified]",
@@ -376,19 +378,13 @@ Keep it direct, friendly, under 80 words, focused on solving their exact project
     return call_gemini(prompt)
 
 
-def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int) -> tuple[bool, int, int, str]:
-    """
-    Verifies live on Reddit:
-    1. Not removed/deleted by moderators or AutoMod
-    2. Posted within the last 30 minutes (<= 1800s)
-    3. Strictly 0 or 1 reply (num_comments <= 1) so you strike before the crowd
-    """
+def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int, max_age_sec: int, max_comments: int) -> tuple[bool, int, int, str]:
     clean_perm = permalink.rstrip("/")
     live_url = f"https://www.reddit.com{clean_perm}.json"
     try:
         resp = client.get(
             live_url,
-            headers={"User-Agent": "CodeXplusLeadHunter/2.2 (by /u/codexplus_bot)"},
+            headers={"User-Agent": "CodeXplusLeadHunter/2.3 (by /u/codexplus_bot)"},
             follow_redirects=True,
         )
         if resp.status_code != 200:
@@ -406,11 +402,11 @@ def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int) -
 
         created_utc = int(post_data.get("created_utc", now_ts))
         age_sec = max(30, now_ts - created_utc)
-        if age_sec > 1800:
+        if age_sec > max_age_sec:
             return False, age_sec, 0, ""
 
         live_comments = int(post_data.get("num_comments", 0))
-        if live_comments > 1:
+        if live_comments > max_comments:
             return False, age_sec, live_comments, ""
 
         return True, age_sec, live_comments, selftext
@@ -418,7 +414,7 @@ def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int) -
         return False, 0, 0, ""
 
 
-def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str]) -> list[dict]:
+def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str], max_age_sec: int, max_comments: int) -> list[dict]:
     found = []
     try:
         with httpx.Client(timeout=12.0) as client:
@@ -432,12 +428,12 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 title = post.get("title", "")
                 body = post.get("selftext", "")
                 num_comments = int(post.get("num_comments", 0))
-                if num_comments > 1:
+                if num_comments > max_comments:
                     continue
                 if is_seller_or_chatter(title, body):
                     continue
-                lower_title = title.lower()
-                if keywords and not any(kw in lower_title for kw in keywords):
+                lower_combo = f"{title.lower()} {body[:300].lower()}"
+                if keywords and not any(kw in lower_combo for kw in keywords):
                     continue
 
                 post_id = post.get("id", "")
@@ -448,7 +444,9 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 if is_already_seen(ext_id, full_url):
                     continue
 
-                is_live, live_age_sec, live_comments, live_body = verify_reddit_post_live(client, permalink, now_ts)
+                is_live, live_age_sec, live_comments, live_body = verify_reddit_post_live(
+                    client, permalink, now_ts, max_age_sec, max_comments
+                )
                 if not is_live:
                     continue
 
@@ -473,7 +471,7 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
     return found
 
 
-def fetch_arctic_shift_reddit() -> list[dict]:
+def fetch_arctic_shift_reddit(freshness: str = "qdr:h") -> list[dict]:
     subs_raw = get_setting(
         "agent_subreddits",
         "forhire,freelance_forhire,DesignJobs,slavelabour,startups,SaaS,shopify,smallbusiness,Entrepreneur",
@@ -484,16 +482,30 @@ def fetch_arctic_shift_reddit() -> list[dict]:
 
     kw_raw = get_setting(
         "agent_reddit_keywords",
-        "[hiring],i will pay,will pay,looking to hire,need a developer,create my,build my,need a designer,budget",
+        "[hiring],looking to hire,looking for a,need a,want to build,create my,build my,i will pay,budget",
     )
     keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
 
+    # Scale Reddit window & reply cap to selected freshness dropdown
+    if freshness == "qdr:h":
+        max_age_sec = 3600    # Last 60 minutes
+        max_comments = 2      # 0 to 2 replies max
+    elif freshness == "qdr:d":
+        max_age_sec = 86400   # Last 24 hours
+        max_comments = 3
+    else:
+        max_age_sec = 259200  # Last 3 days
+        max_comments = 4
+
     now_ts = int(time.time())
-    after_ts = now_ts - 1800  # 30-minute window with <=1 reply so manual & auto scans both find fresh posts
+    after_ts = now_ts - max_age_sec
     items = []
 
     with ThreadPoolExecutor(max_workers=len(subreddits)) as pool:
-        futures = [pool.submit(_fetch_single_subreddit, sub, after_ts, now_ts, keywords) for sub in subreddits]
+        futures = [
+            pool.submit(_fetch_single_subreddit, sub, after_ts, now_ts, keywords, max_age_sec, max_comments)
+            for sub in subreddits
+        ]
         for fut in as_completed(futures):
             items.extend(fut.result())
     return items
@@ -501,14 +513,13 @@ def fetch_arctic_shift_reddit() -> list[dict]:
 
 def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs_val: str) -> list[dict]:
     found = []
-    # Allow up to 60 minutes for qdr:h (accounting for Google's 10-30m indexing delay)
     max_sec = 3600 if tbs_val == "qdr:h" else (86400 if tbs_val == "qdr:d" else 604800)
     try:
         with httpx.Client(timeout=12.0) as client:
             resp = client.post(
                 "https://google.serper.dev/search",
                 headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
-                json={"q": query, "num": 8, "tbs": tbs_val},
+                json={"q": query, "num": 10, "tbs": tbs_val},
             )
             if resp.status_code != 200:
                 return []
@@ -529,7 +540,7 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
                 if is_already_seen(ext_id, link):
                     continue
 
-                badge_text = f"Posted {date_hint}" if date_hint else "Fresh (<1h)"
+                badge_text = f"Posted {date_hint}" if date_hint else f"Fresh ({tbs_val})"
                 found.append(
                     {
                         "external_id": ext_id,
@@ -549,8 +560,12 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
 def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
     clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
     tbs_val = (freshness or "qdr:h").strip()
-    strict_default_dork = '("[hiring]" OR "i will pay" OR "will pay" OR "looking for a developer" OR "need someone to create" OR "create my portfolio" OR "build a mobile app" OR "need a graphic designer") ("budget" OR "$") -"for hire" -"hire me" -"open to work"'
-    base_dork = get_setting("x_query", strict_default_dork)
+    saved_dork = get_setting("x_query", "")
+    # Upgrade any overly narrow legacy dork automatically to the high-recall buyer dork
+    if not saved_dork or '"need someone to create"' in saved_dork:
+        base_dork = BROAD_BUYER_DORK
+    else:
+        base_dork = saved_dork
 
     social_queries = [
         ("X", f"(site:x.com OR site:twitter.com) {base_dork}"),
@@ -568,7 +583,7 @@ def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", targe
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_map = {}
         if t_low in ("all", "reddit"):
-            future_map[executor.submit(fetch_arctic_shift_reddit)] = "Reddit"
+            future_map[executor.submit(fetch_arctic_shift_reddit, tbs_val)] = "Reddit"
 
         if clean_key:
             for platform, q in social_queries:
