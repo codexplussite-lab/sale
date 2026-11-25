@@ -125,7 +125,6 @@
           </button>
         </div>
 
-        <!-- TAB SWITCHER (Full width row on mobile, centered on desktop) -->
         <nav
           class="w-full sm:w-auto order-3 sm:order-2 flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800">
           <button id="tabLeadsBtn" onclick="switchTab('leads')"
@@ -161,7 +160,7 @@
               <span class="w-2 h-2 shrink-0 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>Active Lead Hunter Agent Prompt</span>
             </h2>
-            <p class="text-[11px] text-slate-400 mt-0.5">Scans Reddit (≤1 reply) + X, LinkedIn, Threads, Facebook,
+            <p class="text-[11px] text-slate-400 mt-0.5">Scans Reddit (≤2 replies) + X, LinkedIn, Threads, Facebook,
               Telegram, Discord & Twist concurrently.</p>
           </div>
           <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
@@ -210,7 +209,6 @@
       <!-- FILTER BAR -->
       <div class="glass rounded-2xl p-3.5 sm:p-4 space-y-3.5">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <!-- Horizontally swipeable channel pills on mobile -->
           <div id="platformPills" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
             <button data-platform="all" onclick="setPlatform('all')"
               class="plat-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">All
@@ -308,9 +306,9 @@
       <div class="glass rounded-2xl p-4 sm:p-6 space-y-6">
         <div class="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 class="text-base sm:text-lg font-bold text-white">Agent Studio & 4-Key Gemini Failover Pool</h2>
-            <p class="text-xs text-slate-400 mt-1">Customize your Lead Hunter Agent instructions, auto-generate search
-              dorks, and manage your 4 Gemini API keys.</p>
+            <h2 class="text-base sm:text-lg font-bold text-white">Agent Studio & Multi-Model AI Pool</h2>
+            <p class="text-xs text-slate-400 mt-1">Configure AgentRouter (all models auto-enabled) plus your 4-Key
+              Gemini Failover Pool.</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button type="button" onclick="resetSeenCache()"
@@ -375,6 +373,34 @@
               </select>
             </div>
           </div>
+        </div>
+
+        <!-- AGENTROUTER PRIMARY MULTI-MODEL ENGINE -->
+        <div class="pt-4 border-t border-slate-800 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-emerald-300">AgentRouter API (Primary Multi-Model Router)</h3>
+              <p class="text-[11px] text-slate-400">Automatically rotates across all AgentRouter models (Claude,
+                GPT-4.1/4o, DeepSeek, Gemini, Qwen) with Gemini fallback.</p>
+            </div>
+            <button type="button" onclick="testAgentRouter()"
+              class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold">
+              Test AgentRouter & Load Models
+            </button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+            <div class="md:col-span-2">
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">AgentRouter API Key</label>
+              <input id="agentRouterKey" type="password" placeholder="sk-..."
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">AgentRouter Base URL</label>
+              <input id="agentRouterBaseUrl" type="text" placeholder="https://agentrouter.org/v1"
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-sm sm:text-xs text-white" />
+            </div>
+          </div>
+          <p id="agentRouterStatus" class="text-[11px] text-slate-400 break-words">Ready</p>
         </div>
 
         <!-- 4 GEMINI KEYS GRID -->
@@ -624,7 +650,7 @@
 
               <div class="space-y-1.5">
                 <div class="flex items-center justify-between gap-2">
-                  <label class="text-[11px] font-semibold text-slate-300">AI Client Pitch (Gemini)</label>
+                  <label class="text-[11px] font-semibold text-slate-300">AI Client Pitch</label>
                   <button onclick="regenerateReply(${lead.id}, this)"
                     class="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-semibold transition shrink-0">
                     ↻ Regenerate
@@ -681,7 +707,7 @@
           showBanner(data.detail || 'Failed to regenerate reply.', 'error');
         } else {
           document.getElementById(`reply-${id}`).value = data.suggested_reply;
-          showBanner('Generated fresh Gemini outreach reply.', 'success');
+          showBanner('Generated fresh AI outreach reply.', 'success');
         }
       } finally {
         btn.textContent = orig;
@@ -798,20 +824,26 @@
     }
 
     function pollScanCompletion(attempts = 0) {
-      if (attempts > 15) return;
+      if (attempts > 40) {
+        showBanner('Scan took longer than expected. Click Refresh to check saved leads.', 'info');
+        return;
+      }
       setTimeout(async () => {
         try {
           const res = await fetch('/api/sync/status');
           if (!res.ok) return;
           const st = await res.json();
           if (st.running) {
+            if (st.notes) showBanner(st.notes, 'info');
             pollScanCompletion(attempts + 1);
           } else {
             showBanner(st.notes || 'Scan finished.', st.saved > 0 ? 'success' : 'info');
             await loadLeads();
           }
-        } catch (_) { }
-      }, 3000);
+        } catch (_) {
+          pollScanCompletion(attempts + 1);
+        }
+      }, 2500);
     }
 
     async function triggerSync() {
@@ -851,6 +883,8 @@
       const res = await fetch('/api/admin/settings');
       if (!res.ok) return;
       const { settings } = await res.json();
+      document.getElementById('agentRouterKey').value = settings.agentrouter_api_key || '';
+      document.getElementById('agentRouterBaseUrl').value = settings.agentrouter_base_url || 'https://agentrouter.org/v1';
       document.getElementById('geminiKey1').value = settings.gemini_api_key_1 || '';
       document.getElementById('geminiKey2').value = settings.gemini_api_key_2 || '';
       document.getElementById('geminiKey3').value = settings.gemini_api_key_3 || '';
@@ -865,6 +899,22 @@
       document.getElementById('adminSearchFreshness').value = settings.search_freshness || 'qdr:h';
       document.getElementById('quickFreshness').value = settings.search_freshness || 'qdr:h';
       document.getElementById('adminUsername').value = settings.admin_username || 'admin';
+    }
+
+    async function testAgentRouter() {
+      const key = document.getElementById('agentRouterKey').value.trim();
+      const base_url = document.getElementById('agentRouterBaseUrl').value.trim() || 'https://agentrouter.org/v1';
+      const statusEl = document.getElementById('agentRouterStatus');
+      statusEl.textContent = 'Testing AgentRouter & discovering models...';
+      statusEl.className = 'text-[11px] text-indigo-300';
+      const res = await fetch('/api/admin/test-agentrouter-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key, base_url })
+      });
+      const data = await res.json();
+      statusEl.textContent = data.detail;
+      statusEl.className = data.ok ? 'text-[11px] text-emerald-400 break-words' : 'text-[11px] text-rose-400 break-words';
     }
 
     async function testKey(index) {
@@ -888,6 +938,8 @@
       document.getElementById('quickAgentPrompt').value = promptVal;
       document.getElementById('quickFreshness').value = freshnessVal;
       const payload = {
+        agentrouter_api_key: document.getElementById('agentRouterKey').value.trim(),
+        agentrouter_base_url: document.getElementById('agentRouterBaseUrl').value.trim() || 'https://agentrouter.org/v1',
         gemini_api_key_1: document.getElementById('geminiKey1').value.trim(),
         gemini_api_key_2: document.getElementById('geminiKey2').value.trim(),
         gemini_api_key_3: document.getElementById('geminiKey3').value.trim(),
@@ -909,7 +961,7 @@
       });
       if (res.ok && !silent) {
         document.getElementById('adminPassword').value = '';
-        showBanner('Agent prompt, search rules, and API keys saved.', 'success');
+        showBanner('AgentRouter key, Gemini pool, prompt, and search rules saved.', 'success');
       } else if (!res.ok) {
         showBanner('Failed to save settings.', 'error');
       }

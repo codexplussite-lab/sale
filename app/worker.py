@@ -22,6 +22,18 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
+AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
+AGENTROUTER_FALLBACK_MODELS = [
+    "claude-sonnet-4-5",
+    "gpt-4.1",
+    "gpt-4o",
+    "deepseek-v3",
+    "deepseek-r1",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "qwen-max",
+]
+
 DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who want to pay someone to create or build a project for them—for example:
 - "I will pay $500 for someone to create my portfolio website"
 - "Looking for a website & app developer to build my mobile app / SaaS / e-commerce store"
@@ -31,10 +43,10 @@ DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and busin
 
 BUYER SIGNALS TO PRIORITIZE (SCORE 8-10):
 - Phrases like "I will pay", "paying $", "budget", "$500", "need someone to create my...", "looking to hire", "who can build", "looking for a developer/designer".
-- Clients asking someone to build THEIR portfolio website, business website, mobile app, software, or graphic design (even if they haven't stated the exact dollar budget yet, score 7-8 if the project need is real).
+- Clients asking someone to build THEIR portfolio website, business website, mobile app, software, or graphic design (score 7-8 if the project need is real).
 
 STRICT SELLER / CHATTER EXCLUSIONS (SCORE 1 AND SET is_buyer=false):
-- The post author's display name/header says they are a developer, designer, freelancer, or agency (e.g., "Ray website & app developer", "John | UI/UX Designer").
+- The post author's display name/header says they are a developer, designer, freelancer, or agency.
 - Freelancers/agencies advertising their own services ("[For Hire]", "DM me for services", "check out my portfolio", "I am a developer looking for clients").
 - Tech discussions, book/course requests, memes, or unpaid/equity-only posts."""
 
@@ -228,6 +240,86 @@ def set_setting(key: str, value: str):
     conn.close()
 
 
+def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
+    """Fetches all live models enabled on the user's AgentRouter account, falling back to standard catalog."""
+    clean_base = (base_url or AGENTROUTER_DEFAULT_BASE).rstrip("/")
+    try:
+        with httpx.Client(timeout=6.0) as client:
+            resp = client.get(
+                f"{clean_base}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                live_ids = [m.get("id") for m in data if isinstance(m, dict) and m.get("id")]
+                if live_ids:
+                    # Merge live models with preferred ordering
+                    ordered = [m for m in AGENTROUTER_FALLBACK_MODELS if m in live_ids]
+                    for m in live_ids:
+                        if m not in ordered:
+                            ordered.append(m)
+                    return ordered
+    except Exception:
+        pass
+    return list(AGENTROUTER_FALLBACK_MODELS)
+
+
+def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE, models: list[str] | None = None) -> str:
+    clean_key = (api_key or "").strip()
+    if not clean_key:
+        raise RuntimeError("Empty AgentRouter key")
+    clean_base = (base_url or AGENTROUTER_DEFAULT_BASE).rstrip("/")
+    model_list = models if models else get_agentrouter_models(clean_key, clean_base)
+    errors = []
+
+    with httpx.Client(timeout=10.0) as client:
+        for model in model_list:
+            try:
+                resp = client.post(
+                    f"{clean_base}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {clean_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        msg = choices[0].get("message", {}).get("content", "")
+                        if msg and msg.strip():
+                            return msg.strip()
+                    errors.append(f"AgentRouter ({model}): Empty content")
+                    continue
+
+                err_msg = resp.text[:120].replace("\n", " ")
+                errors.append(f"AgentRouter ({model}) HTTP {resp.status_code}: {err_msg}")
+                if resp.status_code in (401, 403):
+                    break
+            except Exception as exc:
+                errors.append(f"AgentRouter ({model}): {exc}")
+                continue
+
+    raise RuntimeError("AgentRouter failed -> " + " | ".join(errors[:3]))
+
+
+def test_agentrouter_key(api_key: str, base_url: str = AGENTROUTER_DEFAULT_BASE) -> dict:
+    clean_key = (api_key or "").strip()
+    if not clean_key:
+        return {"ok": False, "detail": "Empty AgentRouter key"}
+    try:
+        models = get_agentrouter_models(clean_key, base_url)
+        out = call_agentrouter("Reply with the single word: OK", clean_key, base_url, models[:4])
+        return {"ok": True, "detail": f"Active ({out[:15]}) · {len(models)} models loaded"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:180]}
+
+
 def get_gemini_key_pool() -> list[tuple[str, str]]:
     pool = []
     seen = set()
@@ -244,47 +336,73 @@ def get_gemini_key_pool() -> list[tuple[str, str]]:
     return pool
 
 
-def call_gemini(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
+def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
     keys = override_keys if override_keys is not None else get_gemini_key_pool()
     if not keys:
-        raise RuntimeError("No Gemini API keys configured. Add Key #1-#4 in Admin Panel or .env.")
+        raise RuntimeError("No Gemini API keys configured.")
 
-    models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
+    models = ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     errors = []
 
-    for key_label, api_key in keys:
-        for model in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            try:
-                with httpx.Client(timeout=25.0) as client:
+    with httpx.Client(timeout=9.0) as client:
+        for key_label, api_key in keys:
+            for model in models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                try:
                     resp = client.post(
                         url,
                         json={"contents": [{"parts": [{"text": prompt}]}]},
                     )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        return candidates[0]["content"]["parts"][0]["text"].strip()
-                    errors.append(f"{key_label} ({model}): Empty response")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            return candidates[0]["content"]["parts"][0]["text"].strip()
+                        errors.append(f"{key_label} ({model}): Empty response")
+                        continue
+
+                    err_msg = resp.text[:120].replace("\n", " ")
+                    errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
+                    if resp.status_code in (400, 401, 403):
+                        break
+                except Exception as exc:
+                    errors.append(f"{key_label} ({model}): {exc}")
                     continue
 
-                err_msg = resp.text[:140].replace("\n", " ")
-                errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                if resp.status_code in (400, 401, 403):
-                    break
-            except Exception as exc:
-                errors.append(f"{key_label} ({model}): {exc}")
-                continue
+    raise RuntimeError("Gemini pool failed -> " + " | ".join(errors[:3]))
 
-    raise RuntimeError("All Gemini keys failed -> " + " | ".join(errors[:4]))
+
+def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
+    """
+    Unified AI Router:
+    1. Tries AgentRouter across all available models first (if configured).
+    2. Automatically fails over to the 4-key Gemini pool.
+    """
+    errors = []
+    ar_key = get_setting("agentrouter_api_key")
+    ar_base = get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE)
+    if ar_key:
+        try:
+            return call_agentrouter(prompt, ar_key, ar_base, cached_ar_models)
+        except Exception as exc:
+            errors.append(str(exc))
+
+    if get_gemini_key_pool():
+        try:
+            return call_gemini_only(prompt)
+        except Exception as exc:
+            errors.append(str(exc))
+
+    if not errors:
+        raise RuntimeError("No AI keys configured. Add AgentRouter Key or Gemini Key #1-#4 in Admin Panel.")
+    raise RuntimeError(" | ".join(errors))
 
 
 def test_single_gemini_key(api_key: str) -> dict:
     if not api_key or not api_key.strip():
         return {"ok": False, "detail": "Empty key"}
     try:
-        out = call_gemini("Reply with the single word: OK", [("Test Key", api_key.strip())])
+        out = call_gemini_only("Reply with the single word: OK", [("Test Key", api_key.strip())])
         return {"ok": True, "detail": f"Active ({out[:20]})"}
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:180]}
@@ -303,7 +421,7 @@ Return ONLY valid JSON with these exact keys:
   "reddit_keywords": "comma-separated lowercase trigger phrases to match in Reddit titles/posts, e.g. [hiring],looking to hire,looking for a,need a,want to build,create my,build my,budget",
   "serper_dork": "Google search boolean query without site: prefix that finds clients looking to hire without requiring exact long sentences, e.g. (\\"[hiring]\\" OR \\"looking to hire\\" OR \\"looking for a developer\\" OR \\"need a developer\\" OR \\"need a website\\" OR \\"need an app\\" OR \\"need a graphic designer\\") -\\"for hire\\" -\\"hire me\\" -\\"open to work\\""
 }}"""
-    raw = call_gemini(compiler_prompt)
+    raw = call_ai(compiler_prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     return {
@@ -313,7 +431,7 @@ Return ONLY valid JSON with these exact keys:
     }
 
 
-def score_and_draft(lead: dict, agent_prompt: str) -> tuple[int, str, str, str, str]:
+def score_and_draft(lead: dict, agent_prompt: str, cached_ar_models: list[str] | None = None) -> tuple[int, str, str, str, str]:
     prompt = f"""You are a strict Buyer-vs-Seller Lead Auditor for CodeXplus (https://codexplus.site).
 Your ONLY job is to pass posts where a REAL PAYING CLIENT wants to hire someone to create/build a portfolio website, business website, mobile app, custom software, graphic design, marketing/SEO, or Arduino project.
 
@@ -346,7 +464,7 @@ Respond ONLY in valid JSON:
   "reply": "Direct tailored pitch mentioning https://codexplus.site"
 }}"""
 
-    raw = call_gemini(prompt)
+    raw = call_ai(prompt, cached_ar_models)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     is_buyer = bool(parsed.get("is_buyer", False))
@@ -375,58 +493,25 @@ Title: {lead.get('title', '')}
 Post: {lead.get('raw_text', '')}
 
 Keep it direct, friendly, under 80 words, focused on solving their exact project, and include https://codexplus.site naturally. Return only the reply text."""
-    return call_gemini(prompt)
+    return call_ai(prompt)
 
 
-def verify_reddit_post_live(client: httpx.Client, permalink: str, now_ts: int, max_age_sec: int, max_comments: int) -> tuple[bool, int, int, str]:
-    clean_perm = permalink.rstrip("/")
-    live_url = f"https://www.reddit.com{clean_perm}.json"
-    try:
-        resp = client.get(
-            live_url,
-            headers={"User-Agent": "CodeXplusLeadHunter/2.3 (by /u/codexplus_bot)"},
-            follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            return False, 0, 0, ""
-        payload = resp.json()
-        post_data = payload[0]["data"]["children"][0]["data"]
-
-        if post_data.get("removed_by_category") is not None:
-            return False, 0, 0, ""
-        author = str(post_data.get("author", ""))
-        selftext = str(post_data.get("selftext", "")).strip()
-        title = str(post_data.get("title", "")).strip()
-        if author in ("", "[deleted]") or selftext in ("[removed]", "[deleted]") or "[removed" in title.lower():
-            return False, 0, 0, ""
-
-        created_utc = int(post_data.get("created_utc", now_ts))
-        age_sec = max(30, now_ts - created_utc)
-        if age_sec > max_age_sec:
-            return False, age_sec, 0, ""
-
-        live_comments = int(post_data.get("num_comments", 0))
-        if live_comments > max_comments:
-            return False, age_sec, live_comments, ""
-
-        return True, age_sec, live_comments, selftext
-    except Exception:
-        return False, 0, 0, ""
-
-
-def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str], max_age_sec: int, max_comments: int) -> list[dict]:
+def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list[str], max_comments: int) -> list[dict]:
     found = []
     try:
-        with httpx.Client(timeout=12.0) as client:
+        with httpx.Client(timeout=8.0) as client:
             resp = client.get(
                 "https://arctic-shift.photon-reddit.com/api/posts/search",
-                params={"subreddit": sub, "after": after_ts, "limit": 25, "sort": "desc"},
+                params={"subreddit": sub, "after": after_ts, "limit": 20, "sort": "desc"},
             )
             if resp.status_code != 200:
                 return []
             for post in resp.json().get("data", []):
                 title = post.get("title", "")
                 body = post.get("selftext", "")
+                author = str(post.get("author", ""))
+                if author in ("", "[deleted]") or body.strip() in ("[removed]", "[deleted]"):
+                    continue
                 num_comments = int(post.get("num_comments", 0))
                 if num_comments > max_comments:
                     continue
@@ -444,26 +529,18 @@ def _fetch_single_subreddit(sub: str, after_ts: int, now_ts: int, keywords: list
                 if is_already_seen(ext_id, full_url):
                     continue
 
-                is_live, live_age_sec, live_comments, live_body = verify_reddit_post_live(
-                    client, permalink, now_ts, max_age_sec, max_comments
-                )
-                if not is_live:
-                    continue
-
-                final_body = live_body if live_body else body
-                if is_seller_or_chatter(title, final_body):
-                    continue
-
-                age_label = f"{live_age_sec}s ago" if live_age_sec < 60 else f"{live_age_sec // 60}m ago"
+                created_utc = int(post.get("created_utc", now_ts))
+                age_sec = max(30, now_ts - created_utc)
+                age_label = f"{age_sec}s ago" if age_sec < 60 else f"{age_sec // 60}m ago"
                 found.append(
                     {
                         "external_id": ext_id,
                         "platform": "Reddit",
-                        "author": post.get("author", "unknown"),
+                        "author": author or "unknown",
                         "title": title,
-                        "raw_text": f"{title}\n{final_body}"[:1200],
+                        "raw_text": f"{title}\n{body}"[:1200],
                         "url": full_url,
-                        "freshness_badge": f"Posted {age_label} · {live_comments} replies",
+                        "freshness_badge": f"Posted {age_label} · {num_comments} replies",
                     }
                 )
     except Exception:
@@ -486,15 +563,14 @@ def fetch_arctic_shift_reddit(freshness: str = "qdr:h") -> list[dict]:
     )
     keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
 
-    # Scale Reddit window & reply cap to selected freshness dropdown
     if freshness == "qdr:h":
-        max_age_sec = 3600    # Last 60 minutes
-        max_comments = 2      # 0 to 2 replies max
+        max_age_sec = 3600
+        max_comments = 2
     elif freshness == "qdr:d":
-        max_age_sec = 86400   # Last 24 hours
+        max_age_sec = 86400
         max_comments = 3
     else:
-        max_age_sec = 259200  # Last 3 days
+        max_age_sec = 259200
         max_comments = 4
 
     now_ts = int(time.time())
@@ -503,11 +579,14 @@ def fetch_arctic_shift_reddit(freshness: str = "qdr:h") -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=len(subreddits)) as pool:
         futures = [
-            pool.submit(_fetch_single_subreddit, sub, after_ts, now_ts, keywords, max_age_sec, max_comments)
+            pool.submit(_fetch_single_subreddit, sub, after_ts, now_ts, keywords, max_comments)
             for sub in subreddits
         ]
-        for fut in as_completed(futures):
-            items.extend(fut.result())
+        for fut in as_completed(futures, timeout=12.0):
+            try:
+                items.extend(fut.result())
+            except Exception:
+                pass
     return items
 
 
@@ -515,11 +594,11 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
     found = []
     max_sec = 3600 if tbs_val == "qdr:h" else (86400 if tbs_val == "qdr:d" else 604800)
     try:
-        with httpx.Client(timeout=12.0) as client:
+        with httpx.Client(timeout=8.0) as client:
             resp = client.post(
                 "https://google.serper.dev/search",
                 headers={"X-API-KEY": clean_key, "Content-Type": "application/json"},
-                json={"q": query, "num": 10, "tbs": tbs_val},
+                json={"q": query, "num": 8, "tbs": tbs_val},
             )
             if resp.status_code != 200:
                 return []
@@ -561,7 +640,6 @@ def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", targe
     clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
     tbs_val = (freshness or "qdr:h").strip()
     saved_dork = get_setting("x_query", "")
-    # Upgrade any overly narrow legacy dork automatically to the high-recall buyer dork
     if not saved_dork or '"need someone to create"' in saved_dork:
         base_dork = BROAD_BUYER_DORK
     else:
@@ -590,9 +668,15 @@ def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", targe
                 if t_low in ("all", platform.lower()):
                     future_map[executor.submit(_fetch_single_serper_platform, platform, q, clean_key, tbs_val)] = platform
 
-        for fut in as_completed(future_map):
-            plat = future_map[fut]
-            by_platform.setdefault(plat, []).extend(fut.result())
+        try:
+            for fut in as_completed(future_map, timeout=14.0):
+                plat = future_map[fut]
+                try:
+                    by_platform.setdefault(plat, []).extend(fut.result())
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     interleaved = []
     max_len = max((len(v) for v in by_platform.values()), default=0)
@@ -619,17 +703,21 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             "fetched": 0,
             "saved": 0,
             "rejected": 0,
-            "notes": "Scanning all platforms in parallel...",
+            "notes": "Fetching fresh posts across all 8 channels...",
         }
     )
     try:
         serper_key = get_setting("serper_api_key")
-        key_pool = get_gemini_key_pool()
-        if not key_pool:
-            msg = "No Gemini API keys configured."
+        ar_key = get_setting("agentrouter_api_key")
+        ar_base = get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE)
+        gemini_pool = get_gemini_key_pool()
+
+        if not ar_key and not gemini_pool:
+            msg = "No AI keys configured. Add AgentRouter API Key or Gemini Key #1-#4 in Agent Studio."
             _LAST_SCAN_STATUS.update({"running": False, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()})
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
+        cached_ar_models = get_agentrouter_models(ar_key, ar_base) if ar_key else None
         agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
         active_freshness = (freshness or "").strip() or get_setting("search_freshness", "qdr:h")
         try:
@@ -638,65 +726,80 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             min_keep_score = 7
 
         candidates = fetch_all_channels_parallel(serper_key, active_freshness, platform)
+        unique_candidates = []
+        for item in candidates:
+            if not is_already_seen(item["external_id"], item["url"]):
+                mark_as_seen(item["external_id"], item["url"])
+                unique_candidates.append(item)
+
+        if not unique_candidates:
+            msg = f"Scan complete: 0 brand-new posts found in {active_freshness}. Try 'Past 24 Hours' or Reset Seen Cache."
+            _LAST_SCAN_STATUS.update(
+                {"running": False, "fetched": 0, "saved": 0, "rejected": 0, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()}
+            )
+            return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
+
+        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates in parallel via AI..."
+
         saved = 0
         rejected = 0
         notes = []
 
-        for item in candidates:
-            if is_already_seen(item["external_id"], item["url"]):
-                continue
+        def _audit_one(item: dict):
+            return item, score_and_draft(item, agent_prompt, cached_ar_models)
 
-            mark_as_seen(item["external_id"], item["url"])
+        with ThreadPoolExecutor(max_workers=4) as ai_pool:
+            futures = [ai_pool.submit(_audit_one, item) for item in unique_candidates[:20]]
+            for fut in as_completed(futures):
+                try:
+                    item, (score, summary, service_category, client_region, reply) = fut.result()
+                except Exception as exc:
+                    notes.append(str(exc)[:120])
+                    continue
 
-            try:
-                score, summary, service_category, client_region, reply = score_and_draft(item, agent_prompt)
-                time.sleep(0.25)
                 if score < min_keep_score:
                     rejected += 1
                     continue
-            except Exception as exc:
-                notes.append(f"Gemini ({item['platform']}): {exc}")
-                continue
 
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT OR IGNORE INTO leads (
-                    external_id, platform, author, title, raw_text, url,
-                    score, summary, pain_point_summary, service_category, client_region,
-                    suggested_reply, status, created_at
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO leads (
+                        external_id, platform, author, title, raw_text, url,
+                        score, summary, pain_point_summary, service_category, client_region,
+                        suggested_reply, status, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+                    """,
+                    (
+                        item["external_id"],
+                        item["platform"],
+                        item["author"],
+                        item["title"],
+                        item["raw_text"],
+                        item["url"],
+                        score,
+                        summary,
+                        summary,
+                        service_category,
+                        client_region,
+                        reply,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
-                """,
-                (
-                    item["external_id"],
-                    item["platform"],
-                    item["author"],
-                    item["title"],
-                    item["raw_text"],
-                    item["url"],
-                    score,
-                    summary,
-                    summary,
-                    service_category,
-                    client_region,
-                    reply,
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
-            if cur.rowcount > 0:
-                saved += 1
-            conn.close()
+                if cur.rowcount > 0:
+                    saved += 1
+                conn.close()
 
         summary_note = (
-            f"Scan complete: {len(candidates)} fresh posts checked, {saved} qualified leads saved, {rejected} filtered out."
-            + (f" ({'; '.join(notes[:2])})" if notes else "")
+            f"Scan complete: {len(unique_candidates)} fresh posts checked, {saved} qualified leads saved, {rejected} filtered out."
+            + (f" ({'; '.join(set(notes[:2]))})" if notes else "")
         )
         _LAST_SCAN_STATUS.update(
             {
                 "running": False,
-                "fetched": len(candidates),
+                "fetched": len(unique_candidates),
                 "saved": saved,
                 "rejected": rejected,
                 "notes": summary_note,
@@ -704,10 +807,14 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             }
         )
         return {
-            "fetched": len(candidates),
+            "fetched": len(unique_candidates),
             "saved": saved,
             "rejected": rejected,
             "notes": summary_note,
         }
+    except Exception as fatal_exc:
+        err_note = f"Scan stopped: {fatal_exc}"
+        _LAST_SCAN_STATUS.update({"running": False, "notes": err_note, "finished_at": datetime.now(timezone.utc).isoformat()})
+        return {"fetched": 0, "saved": 0, "rejected": 0, "notes": err_note}
     finally:
         _SYNC_LOCK.release()

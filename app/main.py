@@ -18,9 +18,11 @@ from app.worker import (
     get_setting,
     set_setting,
     test_single_gemini_key,
+    test_agentrouter_key,
     generate_queries_from_prompt,
     get_scan_status,
     clear_seen_cache,
+    AGENTROUTER_DEFAULT_BASE,
     DEFAULT_AGENT_PROMPT,
 )
 
@@ -29,7 +31,7 @@ from app.worker import (
 async def lifespan(app: FastAPI):
     async def _loop():
         while True:
-            await asyncio.sleep(300)  # Auto-scan all 8 platforms every 5 minutes
+            await asyncio.sleep(300)
             try:
                 await asyncio.to_thread(run_sync)
             except Exception as exc:
@@ -47,7 +49,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 COOKIE_NAME = "cx_lead_session"
-SESSION_TTL = 60 * 60 * 24 * 7  # 7 days
+SESSION_TTL = 60 * 60 * 24 * 7
 
 
 def get_secret() -> bytes:
@@ -108,6 +110,8 @@ class LeadUpdate(BaseModel):
 
 class SettingsUpdate(BaseModel):
     serper_api_key: Optional[str] = None
+    agentrouter_api_key: Optional[str] = None
+    agentrouter_base_url: Optional[str] = None
     gemini_api_key_1: Optional[str] = None
     gemini_api_key_2: Optional[str] = None
     gemini_api_key_3: Optional[str] = None
@@ -124,6 +128,7 @@ class SettingsUpdate(BaseModel):
 
 class KeyTestPayload(BaseModel):
     api_key: str
+    base_url: Optional[str] = None
 
 
 class AgentCompilePayload(BaseModel):
@@ -394,6 +399,8 @@ def compile_agent_prompt(payload: AgentCompilePayload, _user: str = Depends(requ
 def get_admin_settings(_user: str = Depends(require_auth)):
     data = {
         "serper_api_key": get_setting("serper_api_key", ""),
+        "agentrouter_api_key": get_setting("agentrouter_api_key", ""),
+        "agentrouter_base_url": get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE),
         "gemini_api_key_1": get_setting("gemini_api_key_1", ""),
         "gemini_api_key_2": get_setting("gemini_api_key_2", ""),
         "gemini_api_key_3": get_setting("gemini_api_key_3", ""),
@@ -405,7 +412,7 @@ def get_admin_settings(_user: str = Depends(require_auth)):
         ),
         "agent_reddit_keywords": get_setting(
             "agent_reddit_keywords",
-            "[hiring],i will pay,will pay,looking to hire,need a developer,create my,build my,need a designer,budget",
+            "[hiring],looking to hire,looking for a,need a,want to build,create my,build my,i will pay,budget",
         ),
         "agent_min_score": int(get_setting("agent_min_score", "7")),
         "search_freshness": get_setting("search_freshness", "qdr:h"),
@@ -421,6 +428,8 @@ def save_admin_settings(payload: SettingsUpdate, _user: str = Depends(require_au
     cur = conn.cursor()
     updates = {
         "serper_api_key": payload.serper_api_key,
+        "agentrouter_api_key": payload.agentrouter_api_key,
+        "agentrouter_base_url": payload.agentrouter_base_url,
         "gemini_api_key_1": payload.gemini_api_key_1,
         "gemini_api_key_2": payload.gemini_api_key_2,
         "gemini_api_key_3": payload.gemini_api_key_3,
@@ -447,3 +456,8 @@ def save_admin_settings(payload: SettingsUpdate, _user: str = Depends(require_au
 @app.post("/api/admin/test-gemini-key")
 def test_gemini_key_endpoint(payload: KeyTestPayload, _user: str = Depends(require_auth)):
     return test_single_gemini_key(payload.api_key)
+
+
+@app.post("/api/admin/test-agentrouter-key")
+def test_agentrouter_key_endpoint(payload: KeyTestPayload, _user: str = Depends(require_auth)):
+    return test_agentrouter_key(payload.api_key, payload.base_url or AGENTROUTER_DEFAULT_BASE)
