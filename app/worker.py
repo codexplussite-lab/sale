@@ -24,7 +24,11 @@ _LAST_SCAN_STATUS = {
 
 AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
 
-# Exact live Claude & ChatGPT/OpenAI model IDs on agentrouter.org/v1
+AGENTROUTER_HEADERS = {
+    "User-Agent": "claude-cli/2.1.158 (external, sdk-cli)",
+    "X-Client-Name": "claude-code",
+}
+
 AGENTROUTER_LATEST_MODELS = [
     "gpt-5.6-sol",
     "gpt-5.5",
@@ -32,7 +36,6 @@ AGENTROUTER_LATEST_MODELS = [
     "claude-opus-4-8",
 ]
 
-# Official Google Gemini 4 models (plus 3.5 Flash-Lite low-cost fallback)
 GEMINI_4_MODELS = [
     "gemini-4-hydrogen",
     "gemini-4-neon",
@@ -254,17 +257,14 @@ def _normalize_agentrouter_base(base_url: str) -> str:
 
 
 def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
-    """
-    Discovers live Claude and ChatGPT/OpenAI models on AgentRouter,
-    prioritizing gpt-5.6-sol, gpt-5.5, claude-opus-5, and claude-opus-4-8.
-    """
     clean_base = _normalize_agentrouter_base(base_url)
+    headers = {
+        **AGENTROUTER_HEADERS,
+        "Authorization": f"Bearer {api_key}",
+    }
     try:
         with httpx.Client(timeout=10.0, follow_redirects=True) as client:
-            resp = client.get(
-                f"{clean_base}/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
+            resp = client.get(f"{clean_base}/models", headers=headers)
             if resp.status_code == 200:
                 payload = resp.json()
                 raw_list = payload.get("data") or payload.get("models") or []
@@ -284,8 +284,7 @@ def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
                         low = lid.lower()
                         if ("claude" in low or "gpt-" in low) and lid not in matched:
                             matched.append(lid)
-                    if matched:
-                        return matched[:4]
+                    return matched[:4] if matched else live_ids[:4]
     except Exception:
         pass
     return list(AGENTROUTER_LATEST_MODELS)
@@ -297,6 +296,11 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
         raise RuntimeError("Empty AgentRouter key")
     clean_base = _normalize_agentrouter_base(base_url)
     model_list = models if models else get_agentrouter_models(clean_key, clean_base)
+    headers = {
+        **AGENTROUTER_HEADERS,
+        "Authorization": f"Bearer {clean_key}",
+        "Content-Type": "application/json",
+    }
     errors = []
 
     with httpx.Client(timeout=10.0, follow_redirects=True) as client:
@@ -304,10 +308,7 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
             try:
                 resp = client.post(
                     f"{clean_base}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {clean_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": prompt}],
@@ -324,7 +325,7 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
                     errors.append(f"AgentRouter ({model}): Empty content")
                     continue
 
-                err_msg = resp.text[:120].replace("\n", " ")
+                err_msg = resp.text[:140].replace("\n", " ")
                 errors.append(f"AgentRouter ({model}) HTTP {resp.status_code}: {err_msg}")
                 if resp.status_code in (401, 403):
                     break
@@ -389,7 +390,6 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
                     err_msg = resp.text[:100].replace("\n", " ")
                     errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                    # Immediately jump to the next key on auth error OR 429 quota limit
                     if resp.status_code in (400, 401, 403, 429):
                         break
                 except Exception as exc:
@@ -400,11 +400,6 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
-    """
-    Unified AI Router:
-    1. Tries AgentRouter (gpt-5.6-sol, gpt-5.5, claude-opus-5, claude-opus-4-8) first if configured.
-    2. Automatically fails over to the 4-key Gemini 4 pool (Hydrogen, Neon, Argon, 3.5 Flash-Lite).
-    """
     errors = []
     ar_key = get_setting("agentrouter_api_key")
     ar_base = get_setting("agentrouter_base_url", AGENTROUTER_DEFAULT_BASE)
