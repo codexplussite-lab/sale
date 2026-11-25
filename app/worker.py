@@ -22,6 +22,8 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
+AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
+
 # Official Google Gemini 4 models (plus 3.5 Flash-Lite low-cost fallback)
 GEMINI_4_MODELS = [
     "gemini-4-hydrogen",
@@ -289,6 +291,14 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
     """Uses ONLY the 4-key Gemini 4 pool (Hydrogen, Neon, Argon, 3.5 Flash-Lite)."""
+    return call_gemini_only(prompt)
+
+
+def get_agentrouter_models(api_key: str, base_url: str = "") -> list[str]:
+    return []
+
+
+def call_agentrouter(prompt: str, api_key: str, base_url: str = "", models: list[str] | None = None) -> str:
     return call_gemini_only(prompt)
 
 
