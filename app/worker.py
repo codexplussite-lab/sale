@@ -24,13 +24,13 @@ _LAST_SCAN_STATUS = {
 
 AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
 
-# Active Gemini models (4-series first, with 2.5 fallbacks)
-GEMINI_MODELS = [
+# Official Google Gemini 4 models + 3.5 / 2.5 fallbacks
+GEMINI_4_MODELS = [
     "gemini-4-hydrogen",
     "gemini-4-neon",
     "gemini-4-argon",
+    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
 ]
 
 DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who want to pay someone to create or build a project for them—for example:
@@ -239,69 +239,63 @@ def set_setting(key: str, value: str):
     conn.close()
 
 
-def _clean_aq_key(raw_key: str) -> str:
-    cleaned = (raw_key or "").strip().strip('"').strip("'").replace("\n", "").replace("\r", "")
-    if not cleaned:
-        return ""
-    if not cleaned.startswith("AQ."):
-        raise ValueError("Only AQ. keys are allowed.")
-    return cleaned
-
-
 def get_gemini_key_pool() -> list[tuple[str, str]]:
     pool = []
     seen = set()
     for idx in range(1, 5):
-        raw = get_setting(f"gemini_api_key_{idx}")
-        if not raw:
-            continue
-        val = _clean_aq_key(raw)
+        k_name = f"gemini_api_key_{idx}"
+        val = get_setting(k_name)
         if val and val not in seen:
             pool.append((f"Key #{idx}", val))
             seen.add(val)
+    legacy = get_setting("gemini_api_key")
+    if legacy and legacy not in seen:
+        pool.append(("Legacy Key", legacy))
+        seen.add(legacy)
     return pool
 
 
 def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
     keys = override_keys if override_keys is not None else get_gemini_key_pool()
     if not keys:
-        raise RuntimeError("No AQ. Gemini keys configured. Add AQ. keys to Gemini Key #1-#4 in Agent Studio.")
+        raise RuntimeError("No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio.")
 
     errors = []
-    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
 
-    with httpx.Client(timeout=15.0) as client:
-        for key_label, raw_key in keys:
-            aq_key = _clean_aq_key(raw_key)
-            if not aq_key:
-                continue
-            headers = {"Content-Type": "application/json", "x-goog-api-key": aq_key}
-            for model in GEMINI_MODELS:
-                url = f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent"
+    with httpx.Client(timeout=12.0) as client:
+        for key_label, api_key in keys:
+            clean_key = api_key.strip()
+            for model in GEMINI_4_MODELS:
+                if clean_key.startswith("AQ."):
+                    url = f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={clean_key}"
+                else:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
                 try:
-                    resp = client.post(url, headers=headers, json=payload)
+                    resp = client.post(
+                        url,
+                        json={"contents": [{"parts": [{"text": prompt}]}]},
+                    )
                     if resp.status_code == 200:
                         data = resp.json()
                         candidates = data.get("candidates", [])
                         if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts and parts[0].get("text"):
-                                return parts[0]["text"].strip()
+                            return candidates[0]["content"]["parts"][0]["text"].strip()
                         errors.append(f"{key_label} ({model}): Empty response")
                         continue
 
-                    err_msg = resp.text[:140].replace("\n", " ")
+                    err_msg = resp.text[:120].replace("\n", " ")
                     errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                    if resp.status_code in (401, 403):
+                    if resp.status_code in (401, 403, 429):
                         break
                 except Exception as exc:
                     errors.append(f"{key_label} ({model}): {exc}")
                     continue
 
-    raise RuntimeError("AQ Gemini pool failed -> " + " | ".join(errors[:4]))
+    raise RuntimeError("Gemini 4 pool failed -> " + " | ".join(errors[:3]))
 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
+    """Uses ONLY the 4-key Gemini pool (supports both AIzaSy AI Studio & AQ. Vertex Express keys)."""
     return call_gemini_only(prompt)
 
 
@@ -314,18 +308,14 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = "", models: list
 
 
 def test_agentrouter_key(api_key: str, base_url: str = "") -> dict:
-    return {"ok": False, "detail": "Disabled — running on 4-key AQ Gemini pool."}
+    return {"ok": False, "detail": "Disabled — running exclusively on Gemini 4 key pool."}
 
 
 def test_single_gemini_key(api_key: str) -> dict:
-    try:
-        aq_key = _clean_aq_key(api_key)
-    except ValueError as exc:
-        return {"ok": False, "detail": str(exc)}
-    if not aq_key:
+    if not api_key or not api_key.strip():
         return {"ok": False, "detail": "Empty key"}
     try:
-        out = call_gemini_only("Reply with the single word: OK", [("Test AQ Key", aq_key)])
+        out = call_gemini_only("Reply with the single word: OK", [("Test Key", api_key.strip())])
         return {"ok": True, "detail": f"Active ({out[:20]})"}
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:180]}
@@ -560,7 +550,7 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
 
 
 def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
-    clean_key = (serper_key or "").strip().strip('"').strip("'").replace("\n", "").replace("\r", "")
+    clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
     tbs_val = (freshness or "qdr:h").strip()
     saved_dork = get_setting("x_query", "")
     if not saved_dork or '"need someone to create"' in saved_dork:
@@ -634,7 +624,7 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
         gemini_pool = get_gemini_key_pool()
 
         if not gemini_pool:
-            msg = "No AQ. Gemini keys configured. Add AQ. keys to Gemini Key #1-#4 in Agent Studio."
+            msg = "No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio."
             _LAST_SCAN_STATUS.update({"running": False, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()})
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
@@ -658,7 +648,7 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             )
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
-        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via AQ Gemini pool..."
+        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via Gemini 4 pool..."
 
         saved = 0
         rejected = 0
