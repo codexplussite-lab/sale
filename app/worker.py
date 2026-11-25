@@ -24,12 +24,13 @@ _LAST_SCAN_STATUS = {
 
 AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
 
-# Official Google Gemini 4 models (plus 3.5 Flash-Lite low-cost fallback)
+# Official Google Gemini 4 models + 3.5 / 2.5 fallbacks
 GEMINI_4_MODELS = [
     "gemini-4-hydrogen",
     "gemini-4-neon",
     "gemini-4-argon",
     "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
 ]
 
 DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who want to pay someone to create or build a project for them—for example:
@@ -263,8 +264,12 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
     with httpx.Client(timeout=12.0) as client:
         for key_label, api_key in keys:
+            clean_key = api_key.strip()
             for model in GEMINI_4_MODELS:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                if clean_key.startswith("AQ."):
+                    url = f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={clean_key}"
+                else:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
                 try:
                     resp = client.post(
                         url,
@@ -278,9 +283,9 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
                         errors.append(f"{key_label} ({model}): Empty response")
                         continue
 
-                    err_msg = resp.text[:100].replace("\n", " ")
+                    err_msg = resp.text[:120].replace("\n", " ")
                     errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                    if resp.status_code in (400, 401, 403, 429):
+                    if resp.status_code in (401, 403, 429):
                         break
                 except Exception as exc:
                     errors.append(f"{key_label} ({model}): {exc}")
@@ -290,7 +295,7 @@ def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = 
 
 
 def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
-    """Uses ONLY the 4-key Gemini 4 pool (Hydrogen, Neon, Argon, 3.5 Flash-Lite)."""
+    """Uses ONLY the 4-key Gemini pool (supports both AIzaSy AI Studio & AQ. Vertex Express keys)."""
     return call_gemini_only(prompt)
 
 
@@ -658,7 +663,7 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
                 try:
                     item, (score, summary, service_category, client_region, reply) = fut.result()
                 except Exception as exc:
-                    notes.append(str(exc)[:120])
+                    notes.append(str(exc)[:140])
                     continue
 
                 mark_as_seen(item["external_id"], item["url"])
