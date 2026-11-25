@@ -22,9 +22,9 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
-AGENTROUTER_DEFAULT_BASE = "https://co.agentrouter.org/v1"
+AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
 
-# Exact live Claude & ChatGPT/OpenAI model IDs on co.agentrouter.org/v1
+# Exact live Claude & ChatGPT/OpenAI model IDs on agentrouter.org/v1
 AGENTROUTER_LATEST_MODELS = [
     "gpt-5.6-sol",
     "gpt-5.5",
@@ -246,14 +246,21 @@ def set_setting(key: str, value: str):
     conn.close()
 
 
+def _normalize_agentrouter_base(base_url: str) -> str:
+    clean = (base_url or AGENTROUTER_DEFAULT_BASE).strip().rstrip("/")
+    if "co.agentrouter.org" in clean:
+        clean = clean.replace("co.agentrouter.org", "agentrouter.org")
+    return clean or AGENTROUTER_DEFAULT_BASE
+
+
 def get_agentrouter_models(api_key: str, base_url: str) -> list[str]:
     """
     Discovers live Claude and ChatGPT/OpenAI models on AgentRouter,
     prioritizing gpt-5.6-sol, gpt-5.5, claude-opus-5, and claude-opus-4-8.
     """
-    clean_base = (base_url or AGENTROUTER_DEFAULT_BASE).rstrip("/")
+    clean_base = _normalize_agentrouter_base(base_url)
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
             resp = client.get(
                 f"{clean_base}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -288,11 +295,11 @@ def call_agentrouter(prompt: str, api_key: str, base_url: str = AGENTROUTER_DEFA
     clean_key = (api_key or "").strip()
     if not clean_key:
         raise RuntimeError("Empty AgentRouter key")
-    clean_base = (base_url or AGENTROUTER_DEFAULT_BASE).rstrip("/")
+    clean_base = _normalize_agentrouter_base(base_url)
     model_list = models if models else get_agentrouter_models(clean_key, clean_base)
     errors = []
 
-    with httpx.Client(timeout=10.0) as client:
+    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
         for model in model_list[:4]:
             try:
                 resp = client.post(
