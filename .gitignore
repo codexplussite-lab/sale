@@ -1,7 +1,8 @@
-__pycache__/
-*.py[cod]
 .env
-data/
-*.db
+data/*.db
+data/*.db-wal
+data/*.db-shm
+__pycache__/
+*.pyc
 .venv/
-.DS_Store
+venv/

@@ -4,12 +4,27 @@ import json
 import time
 import sqlite3
 import hashlib
+import secrets
 import threading
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import httpx
+from dotenv import load_dotenv
 
-DB_PATH = os.environ.get("DB_PATH", "/app/data/leads.db")
+# Load .env automatically when running locally (uvicorn) or inside container
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env", override=False)
+
+# Smart DB_PATH: uses DB_PATH env var if set, /app/data/leads.db inside Docker, or ./data/leads.db locally
+_env_db = os.environ.get("DB_PATH", "").strip()
+if _env_db:
+    DB_PATH = _env_db
+elif Path("/app/data").exists() and os.access("/app/data", os.W_OK):
+    DB_PATH = "/app/data/leads.db"
+else:
+    DB_PATH = str(BASE_DIR / "data" / "leads.db")
+
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 _SYNC_LOCK = threading.Lock()
@@ -22,15 +37,14 @@ _LAST_SCAN_STATUS = {
     "finished_at": "",
 }
 
-AGENTROUTER_DEFAULT_BASE = "https://agentrouter.org/v1"
+AGENTROUTER_BASES = [
+    "https://co.agentrouter.org/v1",
+    "https://agentrouter.org/v1",
+]
 
-# Official Google Gemini 4 models + 3.5 / 2.5 fallbacks
-GEMINI_4_MODELS = [
-    "gemini-4-hydrogen",
-    "gemini-4-neon",
-    "gemini-4-argon",
-    "gemini-3.5-flash-lite",
+GEMINI_MODELS = [
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 ]
 
 DEFAULT_AGENT_PROMPT = """Hunt ONLY for REAL PAYING CLIENTS, founders, and business owners who want to pay someone to create or build a project for them—for example:
@@ -92,6 +106,23 @@ BROAD_BUYER_DORK = '("[hiring]" OR "looking to hire" OR "looking for a developer
 
 def get_scan_status() -> dict:
     return dict(_LAST_SCAN_STATUS)
+
+
+def _clean_secret(raw: str) -> str:
+    return (raw or "").strip().strip('"').strip("'").replace("\n", "").replace("\r", "")
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt_val = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_val.encode("utf-8"), 120_000).hex()
+    return f"{salt_val}${digest}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    if not stored_hash or "$" not in stored_hash:
+        return False
+    salt_val, _ = stored_hash.split("$", 1)
+    return secrets.compare_digest(hash_password(password, salt_val), stored_hash)
 
 
 def is_seller_or_chatter(title: str, body: str) -> bool:
@@ -164,6 +195,19 @@ def get_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'member',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT
+        )
+        """
+    )
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(leads)").fetchall()}
     if "pain_point_summary" not in existing_cols:
         cur.execute("ALTER TABLE leads ADD COLUMN pain_point_summary TEXT DEFAULT ''")
@@ -180,6 +224,17 @@ def get_db():
         )
         """
     )
+
+    # Seed default admin user if users table is empty
+    user_count = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if user_count == 0:
+        admin_email = _clean_secret(os.environ.get("ADMIN_EMAIL", "admin@codexplus.site")).lower() or "admin@codexplus.site"
+        admin_pass = _clean_secret(os.environ.get("ADMIN_PASSWORD", "CodeXplus@2026")) or "CodeXplus@2026"
+        cur.execute(
+            "INSERT INTO users (name, email, password_hash, role, is_active, created_at) VALUES (?, ?, ?, 'admin', 1, ?)",
+            ("CodeXplus Admin", admin_email, hash_password(admin_pass), datetime.now(timezone.utc).isoformat()),
+        )
+
     return conn
 
 
@@ -216,16 +271,17 @@ def clear_seen_cache() -> int:
 
 
 def get_setting(key: str, default: str = "") -> str:
+    env_val = _clean_secret(os.environ.get(key.upper(), ""))
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
     row = cur.fetchone()
     conn.close()
-    if row and row["value"] is not None and str(row["value"]).strip() != "":
-        return str(row["value"]).strip()
-    env_val = os.environ.get(key.upper(), "")
-    if env_val and env_val.strip():
-        return env_val.strip()
+    db_val = _clean_secret(str(row["value"])) if (row and row["value"] is not None) else ""
+    if db_val:
+        return db_val
+    if env_val:
+        return env_val
     return default
 
 
@@ -239,12 +295,105 @@ def set_setting(key: str, value: str):
     conn.close()
 
 
+def get_active_provider() -> str:
+    """Returns strictly the selected provider: 'agentrouter' or 'gemini'."""
+    saved = get_setting("ai_provider", "").lower()
+    if saved in ("agentrouter", "gemini"):
+        return saved
+    if _clean_secret(os.environ.get("AGENTROUTER_API_KEY", "")) or get_setting("agentrouter_api_key"):
+        return "agentrouter"
+    return "gemini"
+
+
+def get_agentrouter_config() -> tuple[str, str]:
+    api_key = _clean_secret(os.environ.get("AGENTROUTER_API_KEY", "")) or get_setting("agentrouter_api_key")
+    base_url = _clean_secret(os.environ.get("AGENTROUTER_BASE_URL", "")) or get_setting("agentrouter_base_url")
+    return api_key, base_url
+
+
+def get_agentrouter_models(api_key: str, base_url: str = "") -> list[str]:
+    clean_key = _clean_secret(api_key)
+    if not clean_key:
+        return []
+    bases = [base_url.rstrip("/")] if base_url else AGENTROUTER_BASES
+    headers = {"Authorization": f"Bearer {clean_key}"}
+    with httpx.Client(timeout=10.0) as client:
+        for base in bases:
+            try:
+                resp = client.get(f"{base}/models", headers=headers)
+                if resp.status_code == 200:
+                    items = resp.json().get("data", [])
+                    ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
+                    if ids:
+                        return ids
+            except Exception:
+                continue
+    return ["gpt-5.5", "claude-sonnet-4-6", "gemini-2.5-flash", "deepseek-chat"]
+
+
+def call_agentrouter(prompt: str, api_key: str, base_url: str = "", models: list[str] | None = None) -> str:
+    clean_key = _clean_secret(api_key)
+    if not clean_key:
+        raise RuntimeError("AgentRouter is selected, but AGENTROUTER_API_KEY is missing in .env and Settings.")
+
+    bases = [base_url.rstrip("/")] if base_url else AGENTROUTER_BASES
+    candidate_models = models if models else get_agentrouter_models(clean_key, base_url)
+    headers = {
+        "Authorization": f"Bearer {clean_key}",
+        "Content-Type": "application/json",
+    }
+    errors = []
+
+    with httpx.Client(timeout=20.0) as client:
+        for base in bases:
+            for model in candidate_models[:6]:
+                try:
+                    resp = client.post(
+                        f"{base}/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            text = choices[0].get("message", {}).get("content", "")
+                            if text and text.strip():
+                                return text.strip()
+                        errors.append(f"{base} ({model}): Empty response")
+                        continue
+                    err_snippet = resp.text[:140].replace("\n", " ")
+                    errors.append(f"{base} ({model}) HTTP {resp.status_code}: {err_snippet}")
+                    if resp.status_code in (401, 403):
+                        break
+                except Exception as exc:
+                    errors.append(f"{base} ({model}): {exc}")
+                    continue
+
+    raise RuntimeError("AgentRouter error -> " + " | ".join(errors[:3]))
+
+
+def test_agentrouter_key(api_key: str, base_url: str = "") -> dict:
+    clean_key = _clean_secret(api_key)
+    if not clean_key:
+        return {"ok": False, "detail": "Empty AgentRouter key"}
+    try:
+        models = get_agentrouter_models(clean_key, base_url)
+        out = call_agentrouter("Reply with the single word: OK", clean_key, base_url, models)
+        return {"ok": True, "detail": f"Active ({out[:20]}) · {len(models)} models"}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)[:180]}
+
+
 def get_gemini_key_pool() -> list[tuple[str, str]]:
     pool = []
     seen = set()
     for idx in range(1, 5):
-        k_name = f"gemini_api_key_{idx}"
-        val = get_setting(k_name)
+        val = get_setting(f"gemini_api_key_{idx}")
         if val and val not in seen:
             pool.append((f"Key #{idx}", val))
             seen.add(val)
@@ -258,67 +407,60 @@ def get_gemini_key_pool() -> list[tuple[str, str]]:
 def call_gemini_only(prompt: str, override_keys: list[tuple[str, str]] | None = None) -> str:
     keys = override_keys if override_keys is not None else get_gemini_key_pool()
     if not keys:
-        raise RuntimeError("No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio.")
+        raise RuntimeError("Gemini is selected, but no Gemini API keys are configured in Agent Studio.")
 
     errors = []
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
 
-    with httpx.Client(timeout=12.0) as client:
-        for key_label, api_key in keys:
-            clean_key = api_key.strip()
-            for model in GEMINI_4_MODELS:
-                if clean_key.startswith("AQ."):
-                    url = f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={clean_key}"
-                else:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
+    with httpx.Client(timeout=15.0) as client:
+        for key_label, raw_key in keys:
+            clean_key = _clean_secret(raw_key)
+            if not clean_key:
+                continue
+            headers = {"Content-Type": "application/json", "x-goog-api-key": clean_key}
+            for model in GEMINI_MODELS:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                 try:
-                    resp = client.post(
-                        url,
-                        json={"contents": [{"parts": [{"text": prompt}]}]},
-                    )
+                    resp = client.post(url, headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         candidates = data.get("candidates", [])
                         if candidates:
-                            return candidates[0]["content"]["parts"][0]["text"].strip()
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts and parts[0].get("text"):
+                                return parts[0]["text"].strip()
                         errors.append(f"{key_label} ({model}): Empty response")
                         continue
 
-                    err_msg = resp.text[:120].replace("\n", " ")
+                    err_msg = resp.text[:140].replace("\n", " ")
                     errors.append(f"{key_label} ({model}) HTTP {resp.status_code}: {err_msg}")
-                    if resp.status_code in (401, 403, 429):
+                    if resp.status_code in (400, 401, 403):
                         break
                 except Exception as exc:
                     errors.append(f"{key_label} ({model}): {exc}")
                     continue
 
-    raise RuntimeError("Gemini 4 pool failed -> " + " | ".join(errors[:3]))
-
-
-def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
-    """Uses ONLY the 4-key Gemini pool (supports both AIzaSy AI Studio & AQ. Vertex Express keys)."""
-    return call_gemini_only(prompt)
-
-
-def get_agentrouter_models(api_key: str, base_url: str = "") -> list[str]:
-    return []
-
-
-def call_agentrouter(prompt: str, api_key: str, base_url: str = "", models: list[str] | None = None) -> str:
-    return call_gemini_only(prompt)
-
-
-def test_agentrouter_key(api_key: str, base_url: str = "") -> dict:
-    return {"ok": False, "detail": "Disabled — running exclusively on Gemini 4 key pool."}
+    raise RuntimeError("Gemini error -> " + " | ".join(errors[:3]))
 
 
 def test_single_gemini_key(api_key: str) -> dict:
-    if not api_key or not api_key.strip():
+    cleaned = _clean_secret(api_key)
+    if not cleaned:
         return {"ok": False, "detail": "Empty key"}
     try:
-        out = call_gemini_only("Reply with the single word: OK", [("Test Key", api_key.strip())])
+        out = call_gemini_only("Reply with the single word: OK", [("Test Key", cleaned)])
         return {"ok": True, "detail": f"Active ({out[:20]})"}
     except Exception as exc:
         return {"ok": False, "detail": str(exc)[:180]}
+
+
+def call_ai(prompt: str, cached_ar_models: list[str] | None = None) -> str:
+    """Strictly uses ONLY the provider chosen by the user (AgentRouter OR Gemini)."""
+    provider = get_active_provider()
+    if provider == "agentrouter":
+        ar_key, ar_base = get_agentrouter_config()
+        return call_agentrouter(prompt, ar_key, ar_base, cached_ar_models)
+    return call_gemini_only(prompt)
 
 
 def generate_queries_from_prompt(agent_prompt: str) -> dict:
@@ -332,7 +474,7 @@ Return ONLY valid JSON with these exact keys:
 {{
   "subreddits": "comma-separated relevant subreddits without r/, e.g. forhire,freelance_forhire,DesignJobs,slavelabour,startups,SaaS,shopify,smallbusiness",
   "reddit_keywords": "comma-separated lowercase trigger phrases to match in Reddit titles/posts, e.g. [hiring],looking to hire,looking for a,need a,want to build,create my,build my,budget",
-  "serper_dork": "Google search boolean query without site: prefix that finds clients looking to hire without requiring exact long sentences, e.g. (\\"[hiring]\\" OR \\"looking to hire\\" OR \\"looking for a developer\\" OR \\"need a developer\\" OR \\"need a website\\" OR \\"need an app\\" OR \\"need a graphic designer\\") -\\"for hire\\" -\\"hire me\\" -\\"open to work\\""
+  "serper_dork": "Google search boolean query without site: prefix that finds clients looking to hire without requiring exact long sentences, e.g. (\"[hiring]\" OR \"looking to hire\" OR \"looking for a developer\" OR \"need a developer\" OR \"need a website\" OR \"need an app\" OR \"need a graphic designer\") -\"for hire\" -\"hire me\" -\"open to work\""
 }}"""
     raw = call_ai(compiler_prompt)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
@@ -377,7 +519,7 @@ Respond ONLY in valid JSON:
   "reply": "Direct tailored pitch mentioning https://codexplus.site"
 }}"""
 
-    raw = call_ai(prompt)
+    raw = call_ai(prompt, cached_ar_models)
     cleaned = re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
     parsed = json.loads(cleaned)
     is_buyer = bool(parsed.get("is_buyer", False))
@@ -550,7 +692,7 @@ def _fetch_single_serper_platform(platform: str, query: str, clean_key: str, tbs
 
 
 def fetch_all_channels_parallel(serper_key: str, freshness: str = "qdr:h", target_platform: str = "all") -> list[dict]:
-    clean_key = (serper_key or "").strip().replace("\n", "").replace("\r", "")
+    clean_key = _clean_secret(serper_key)
     tbs_val = (freshness or "qdr:h").strip()
     saved_dork = get_setting("x_query", "")
     if not saved_dork or '"need someone to create"' in saved_dork:
@@ -621,13 +763,21 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
     )
     try:
         serper_key = get_setting("serper_api_key")
+        provider = get_active_provider()
+        ar_key, ar_base = get_agentrouter_config()
         gemini_pool = get_gemini_key_pool()
 
-        if not gemini_pool:
-            msg = "No Gemini API keys configured. Add Gemini Key #1-#4 in Agent Studio."
+        if provider == "agentrouter" and not ar_key:
+            msg = "AgentRouter is selected, but AGENTROUTER_API_KEY is not set in .env or Settings."
             _LAST_SCAN_STATUS.update({"running": False, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()})
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
+        if provider == "gemini" and not gemini_pool:
+            msg = "Gemini is selected, but no Gemini keys are saved in Agent Studio."
+            _LAST_SCAN_STATUS.update({"running": False, "notes": msg, "finished_at": datetime.now(timezone.utc).isoformat()})
+            return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
+
+        cached_ar_models = get_agentrouter_models(ar_key, ar_base) if provider == "agentrouter" else None
         agent_prompt = (custom_prompt or "").strip() or get_setting("agent_prompt", DEFAULT_AGENT_PROMPT)
         active_freshness = (freshness or "").strip() or get_setting("search_freshness", "qdr:h")
         try:
@@ -648,14 +798,15 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
             )
             return {"fetched": 0, "saved": 0, "rejected": 0, "notes": msg}
 
-        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via Gemini 4 pool..."
+        engine_label = "AgentRouter" if provider == "agentrouter" else "Gemini"
+        _LAST_SCAN_STATUS["notes"] = f"Qualifying {len(unique_candidates)} candidates via {engine_label}..."
 
         saved = 0
         rejected = 0
         notes = []
 
         def _audit_one(item: dict):
-            return item, score_and_draft(item, agent_prompt)
+            return item, score_and_draft(item, agent_prompt, cached_ar_models)
 
         with ThreadPoolExecutor(max_workers=4) as ai_pool:
             futures = [ai_pool.submit(_audit_one, item) for item in unique_candidates[:20]]
@@ -704,7 +855,7 @@ def run_sync(custom_prompt: str | None = None, freshness: str | None = None, pla
                 conn.close()
 
         summary_note = (
-            f"Scan complete: {len(unique_candidates)} fresh posts checked, {saved} qualified leads saved, {rejected} filtered out."
+            f"Scan complete ({engine_label}): {len(unique_candidates)} fresh posts checked, {saved} qualified leads saved, {rejected} filtered out."
             + (f" ({'; '.join(set(notes[:2]))})" if notes else "")
         )
         _LAST_SCAN_STATUS.update(

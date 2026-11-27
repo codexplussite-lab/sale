@@ -1,24 +1,21 @@
-# CodeXplus Lead Engine (Full Production Bundle)
+# CodeXplus Lead Engine (v3 — Local + VPS Ready, Includes `.env`)
 
-Complete FastAPI + SQLite + Docker web application with:
-- **Authenticated Login & Admin Panel** (`HttpOnly` signed session cookie)
-- **4-Key Gemini Failover Pool** (`GEMINI_API_KEY_1` through `GEMINI_API_KEY_4` with automatic rotation, live per-key test buttons, and `responseMimeType: "application/json"` structured schema)
-- **Active Gemini Models** with automatic failover (`gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-2.5-pro`, `gemini-3.5-flash-lite`, `gemini-3.8-flash`)
-- **6 Core Agency Service Verticals**: Web/App Dev, E-Commerce, ERP/Portal, UI/UX & Branding, Video/Reels, SMM/SEO
-- **Mandatory Search Freshness / Date Filter**: Last 24 Hours (`qdr:d` default for live hunting), Last 7 Days (`qdr:w`), Last 30 Days (`qdr:m`)
-- **Strict Duplicate Lead Prevention**: Pre-checks existing URLs and external IDs before calling Gemini to eliminate wasted API quota
-- **Multi-Channel Lead Scraper**: Reddit via Arctic Shift + X, LinkedIn, Threads, Facebook, Telegram, Discord, and Twist via Serper.dev
-- **Dashboard Filters & Controls**: Channel pills, 6 Service Category filters, Region filters (USA, UK/Europe, UAE/Gulf, Pakistan), Stated Budget `$` filter, Client Pain Point highlights, Tailored Pitch 1-click copy, and manual Gemini reply regeneration
-
-## Quick Deploy on Contabo VPS
-
-1. Copy `.env.example` to `.env` and set your credentials and API keys:
+## 1. Run Locally (Windows / Mac / Linux)
+1. Open the unzipped folder and put your `AGENTROUTER_API_KEY` (and optional `SERPER_API_KEY`) inside `.env`.
+2. Install dependencies and start the server:
    ```bash
-   cp .env.example .env
-   nano .env
+   pip install -r requirements.txt
+   uvicorn app.main:app --reload --port 8000
    ```
-2. Build and start with Docker Compose:
-   ```bash
-   docker compose up -d --build
-   ```
-3. Open `https://hunt.codexplus.site`, log in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`, and manage your 4 Gemini keys anytime in **Agent Studio & Keys**.
+3. Open `http://127.0.0.1:8000` and sign in with:
+   - **Email:** `admin@codexplus.site`
+   - **Password:** `CodeXplus@2026`
+
+## 2. Deploy on Contabo VPS (Without Overwriting Your Server `.env`)
+- Because `.gitignore` excludes `.env` and `data/*.db`, pushing from local will **not** overwrite your VPS `.env`.
+- On your VPS:
+  ```bash
+  cd /www/wwwroot/hunt.codexplus.site
+  git fetch origin main && git reset --hard origin/main
+  docker compose up -d --build
+  ```
